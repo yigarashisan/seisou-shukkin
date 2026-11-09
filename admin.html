@@ -124,18 +124,45 @@
 </details>
 <div id="locationList"></div>
 
-<h2>担当(従業員 × 清掃場所)</h2>
+<h2>清掃場所のスケジュール(曜日ごとの時間)</h2>
+<div class="form-card">
+  <select id="scheduleLocation"></select>
+  <select id="scheduleDay" style="flex: 0 0 80px;">
+    <option value="1">月</option>
+    <option value="2">火</option>
+    <option value="3">水</option>
+    <option value="4">木</option>
+    <option value="5">金</option>
+    <option value="6">土</option>
+    <option value="0">日</option>
+  </select>
+  <input id="scheduleStartTime" type="time" style="flex: 0 0 110px;" />
+  <input id="scheduleHours" type="number" step="0.1" placeholder="清掃時間(例: 1.5)" />
+  <button class="btn btn-primary" onclick="addSchedule()">追加</button>
+</div>
+<details style="margin-bottom: 16px;">
+  <summary style="cursor:pointer; color: var(--brown); font-size: 13px;">まとめて登録(CSV貼り付け)</summary>
+  <div class="form-card" style="margin-top: 8px; flex-direction: column; align-items: stretch;">
+    <textarea id="scheduleCsv" rows="6" placeholder="場所コード,曜日,開始時刻,清掃時間&#10;L012,月,07:30,1.5&#10;L012,水,07:30,1.0" style="width:100%; font-family: monospace; font-size: 13px;"></textarea>
+    <p class="meta">曜日は 月火水木金土日 の1文字で入力してください</p>
+    <button class="btn btn-primary" style="margin-top: 8px;" onclick="importSchedulesCsv()">この内容で一括登録</button>
+    <div id="scheduleImportResult" class="meta"></div>
+  </div>
+</details>
+<div id="scheduleList"></div>
+
+<h2>担当(従業員 × スケジュール)</h2>
 <div class="form-card">
   <select id="assignEmployee"></select>
-  <select id="assignLocation"></select>
-  <input id="assignStartTime" type="time" placeholder="開始時刻" style="flex: 0 0 110px;" />
-  <input id="assignHours" type="number" step="0.1" placeholder="1回の清掃時間(例: 1.5)" />
+  <select id="assignScheduleLocation" onchange="updateAssignScheduleOptions()"></select>
+  <select id="assignSchedule"></select>
   <button class="btn btn-primary" onclick="addAssignment()">追加</button>
 </div>
 <details style="margin-bottom: 16px;">
   <summary style="cursor:pointer; color: var(--brown); font-size: 13px;">まとめて登録(CSV貼り付け)</summary>
   <div class="form-card" style="margin-top: 8px; flex-direction: column; align-items: stretch;">
-    <textarea id="assignmentCsv" rows="6" placeholder="従業員コード,場所コード,開始時刻,清掃時間&#10;E001,L012,07:30,1.5" style="width:100%; font-family: monospace; font-size: 13px;"></textarea>
+    <textarea id="assignmentCsv" rows="6" placeholder="従業員コード,場所コード,曜日,開始時刻&#10;E001,L012,月,07:30" style="width:100%; font-family: monospace; font-size: 13px;"></textarea>
+    <p class="meta">「場所コード,曜日,開始時刻」が、上で登録済みのスケジュールと一致する必要があります</p>
     <button class="btn btn-primary" style="margin-top: 8px;" onclick="importAssignmentsCsv()">この内容で一括登録</button>
     <div id="assignmentImportResult" class="meta"></div>
   </div>
@@ -163,9 +190,12 @@
 <script>
 let employees = [];
 let locations = [];
+let schedules = [];
 let assignments = [];
 let viewMonth = new Date();
 viewMonth.setDate(1);
+
+const WEEKDAY_LABELS = ['日', '月', '火', '水', '木', '金', '土'];
 
 const ADMIN_PASSWORD_HASH = '850ad2afc34dc9275acda04522038e0bdbefdaec9ac36a2c56a6301ad82234dc';
 
@@ -223,16 +253,20 @@ function personalLink(slug) {
 }
 
 async function loadAll() {
-  const [e, l, a] = await Promise.all([
+  const [e, l, s, a] = await Promise.all([
     sb.from('employees').select('*').order('name'),
     sb.from('locations').select('*').order('name'),
-    sb.from('assignments').select('*, employees(name), locations(name)'),
+    sb.from('location_schedules').select('*, locations(name)'),
+    sb.from('assignments').select('*, employees(name), location_schedules(day_of_week, start_time, standard_hours, location_id, locations(name))'),
   ]);
   employees = e.data || [];
   locations = l.data || [];
+  schedules = s.data || [];
   assignments = a.data || [];
   renderEmployees();
   renderLocations();
+  renderScheduleForm();
+  renderSchedules();
   renderAssignmentForm();
   renderAssignments();
   renderSummary();
@@ -270,23 +304,104 @@ function renderLocations() {
   `).join('') + '</div>';
 }
 
+function renderScheduleForm() {
+  document.getElementById('scheduleLocation').innerHTML = locations.map((l) => `<option value="${l.id}">${l.name}</option>`).join('');
+}
+
+function renderSchedules() {
+  const el = document.getElementById('scheduleList');
+  if (schedules.length === 0) { el.innerHTML = '<p class="empty">まだスケジュールが登録されていません</p>'; return; }
+  const byLocation = new Map();
+  for (const s of schedules) {
+    const key = s.location_id;
+    if (!byLocation.has(key)) byLocation.set(key, { name: s.locations?.name ?? '?', items: [] });
+    byLocation.get(key).items.push(s);
+  }
+  el.innerHTML = Array.from(byLocation.values()).map((loc) => `
+    <div class="card">
+      <div class="name" style="margin-bottom: 8px;">${loc.name}</div>
+      ${loc.items
+        .sort((a, b) => a.day_of_week - b.day_of_week || a.start_time.localeCompare(b.start_time))
+        .map((s, i) => `
+          <div class="row" ${i > 0 ? 'style="margin-top:8px; padding-top:8px; border-top:1px solid #F3EFE4;"' : ''}>
+            <div>${WEEKDAY_LABELS[s.day_of_week]}曜 ${s.start_time}〜${addHours(s.start_time, s.standard_hours)}(${s.standard_hours}時間)</div>
+            <button class="btn btn-danger btn-small" onclick="deleteSchedule('${s.id}')">削除</button>
+          </div>
+        `).join('')}
+    </div>
+  `).join('');
+}
+
+async function addSchedule() {
+  const location_id = document.getElementById('scheduleLocation').value;
+  const day_of_week = parseInt(document.getElementById('scheduleDay').value, 10);
+  const start_time = document.getElementById('scheduleStartTime').value;
+  const standard_hours = parseFloat(document.getElementById('scheduleHours').value);
+  if (!location_id || !start_time || !standard_hours) { alert('場所・開始時刻・清掃時間を入力してください'); return; }
+  await sb.from('location_schedules').insert({ location_id, day_of_week, start_time, standard_hours });
+  document.getElementById('scheduleStartTime').value = '';
+  document.getElementById('scheduleHours').value = '';
+  loadAll();
+}
+
+async function importSchedulesCsv() {
+  const rows = parseCsvLines(document.getElementById('scheduleCsv').value);
+  const locByCode = new Map(locations.filter((l) => l.code).map((l) => [l.code, l.id]));
+  let added = 0;
+  const errors = [];
+  for (const [locCode, dayStr, startTime, hoursStr] of rows) {
+    if (!locCode) continue;
+    const location_id = locByCode.get(locCode);
+    const day_of_week = WEEKDAY_LABELS.indexOf(dayStr);
+    const standard_hours = parseFloat(hoursStr);
+    if (!location_id || day_of_week < 0 || !startTime || !standard_hours) {
+      errors.push(`${locCode},${dayStr}: 内容を確認してください(場所コード・曜日・時刻・時間)`);
+      continue;
+    }
+    await sb.from('location_schedules').insert({ location_id, day_of_week, start_time: startTime, standard_hours });
+    added++;
+  }
+  document.getElementById('scheduleImportResult').innerHTML = `${added}件登録` + (errors.length ? `<br>確認が必要: ${errors.length}件<br>${errors.join('<br>')}` : '');
+  document.getElementById('scheduleCsv').value = '';
+  loadAll();
+}
+
+async function deleteSchedule(id) {
+  if (!confirm('このスケジュールを削除しますか?(関連する担当も削除されます)')) return;
+  await sb.from('location_schedules').delete().eq('id', id);
+  loadAll();
+}
+
 function renderAssignmentForm() {
   document.getElementById('assignEmployee').innerHTML = employees.map((e) => `<option value="${e.id}">${e.name}</option>`).join('');
-  document.getElementById('assignLocation').innerHTML = locations.map((l) => `<option value="${l.id}">${l.name}</option>`).join('');
+  document.getElementById('assignScheduleLocation').innerHTML = locations.map((l) => `<option value="${l.id}">${l.name}</option>`).join('');
+  updateAssignScheduleOptions();
+}
+
+function updateAssignScheduleOptions() {
+  const locId = document.getElementById('assignScheduleLocation').value;
+  const opts = schedules
+    .filter((s) => s.location_id === locId)
+    .sort((a, b) => a.day_of_week - b.day_of_week || a.start_time.localeCompare(b.start_time))
+    .map((s) => `<option value="${s.id}">${WEEKDAY_LABELS[s.day_of_week]}曜 ${s.start_time}〜${addHours(s.start_time, s.standard_hours)}</option>`);
+  document.getElementById('assignSchedule').innerHTML = opts.length ? opts.join('') : '<option value="">(この場所のスケジュール未登録)</option>';
 }
 
 function renderAssignments() {
   const el = document.getElementById('assignmentList');
   if (assignments.length === 0) { el.innerHTML = '<p class="empty">まだ担当が登録されていません</p>'; return; }
-  el.innerHTML = '<div class="card">' + assignments.map((a) => `
+  el.innerHTML = '<div class="card">' + assignments.map((a) => {
+    const s = a.location_schedules;
+    const label = s
+      ? `${s.locations?.name ?? '?'}(${WEEKDAY_LABELS[s.day_of_week]}曜 ${s.start_time}〜${addHours(s.start_time, s.standard_hours)})`
+      : '(スケジュール不明)';
+    return `
     <div class="row">
-      <div class="name">${a.employees?.name ?? '?'} × ${a.locations?.name ?? '?'} <span style="color:var(--muted); font-weight:400;">(${a.start_time ? a.start_time + '〜' + addHours(a.start_time, a.standard_hours) : a.standard_hours + '時間(開始時刻未設定)'})</span></div>
-      <div style="display:flex; gap:6px;">
-        <button class="copybtn" onclick="editAssignmentStartTime('${a.id}', '${a.start_time ?? ''}')">開始時刻編集</button>
-        <button class="btn btn-danger btn-small" onclick="deleteAssignment('${a.id}')">削除</button>
-      </div>
+      <div class="name">${a.employees?.name ?? '?'} × ${label}</div>
+      <button class="btn btn-danger btn-small" onclick="deleteAssignment('${a.id}')">削除</button>
     </div>
-  `).join('') + '</div>';
+  `;
+  }).join('') + '</div>';
 }
 
 async function addEmployee() {
@@ -369,13 +484,9 @@ async function deleteLocation(id) {
 
 async function addAssignment() {
   const employee_id = document.getElementById('assignEmployee').value;
-  const location_id = document.getElementById('assignLocation').value;
-  const start_time = document.getElementById('assignStartTime').value || null;
-  const standard_hours = parseFloat(document.getElementById('assignHours').value);
-  if (!employee_id || !location_id || !standard_hours) { alert('担当・時間は必須です'); return; }
-  await sb.from('assignments').insert({ employee_id, location_id, start_time, standard_hours });
-  document.getElementById('assignHours').value = '';
-  document.getElementById('assignStartTime').value = '';
+  const schedule_id = document.getElementById('assignSchedule').value;
+  if (!employee_id || !schedule_id) { alert('従業員とスケジュールを選択してください'); return; }
+  await sb.from('assignments').insert({ employee_id, schedule_id });
   loadAll();
 }
 
@@ -383,36 +494,26 @@ async function importAssignmentsCsv() {
   const rows = parseCsvLines(document.getElementById('assignmentCsv').value);
   const empByCode = new Map(employees.filter((e) => e.code).map((e) => [e.code, e.id]));
   const locByCode = new Map(locations.filter((l) => l.code).map((l) => [l.code, l.id]));
-  const existingPairs = new Set(assignments.map((a) => a.employee_id + '|' + a.location_id));
+  const existingPairs = new Set(assignments.map((a) => a.employee_id + '|' + a.schedule_id));
   let added = 0;
   const errors = [];
-  for (const [empCode, locCode, startTime, hoursStr] of rows) {
+  for (const [empCode, locCode, dayStr, startTime] of rows) {
     if (!empCode || !locCode) continue;
     const employee_id = empByCode.get(empCode);
     const location_id = locByCode.get(locCode);
-    const standard_hours = parseFloat(hoursStr);
-    if (!employee_id || !location_id) {
-      errors.push(`${empCode},${locCode}: 該当する従業員コードまたは場所コードが見つかりません`);
+    const day_of_week = WEEKDAY_LABELS.indexOf(dayStr);
+    const schedule = schedules.find((s) => s.location_id === location_id && s.day_of_week === day_of_week && s.start_time === startTime);
+    if (!employee_id || !schedule) {
+      errors.push(`${empCode},${locCode},${dayStr},${startTime}: 該当する従業員またはスケジュールが見つかりません`);
       continue;
     }
-    if (!standard_hours) {
-      errors.push(`${empCode},${locCode}: 清掃時間が不正です`);
-      continue;
-    }
-    if (existingPairs.has(employee_id + '|' + location_id)) continue;
-    await sb.from('assignments').insert({ employee_id, location_id, start_time: startTime || null, standard_hours });
-    existingPairs.add(employee_id + '|' + location_id);
+    if (existingPairs.has(employee_id + '|' + schedule.id)) continue;
+    await sb.from('assignments').insert({ employee_id, schedule_id: schedule.id });
+    existingPairs.add(employee_id + '|' + schedule.id);
     added++;
   }
   document.getElementById('assignmentImportResult').innerHTML = `${added}件登録` + (errors.length ? `<br>確認が必要: ${errors.length}件<br>${errors.join('<br>')}` : '');
   document.getElementById('assignmentCsv').value = '';
-  loadAll();
-}
-
-async function editAssignmentStartTime(id, current) {
-  const time = prompt('開始時刻を入力してください(例: 07:30)', current);
-  if (time === null) return;
-  await sb.from('assignments').update({ start_time: time.trim() || null }).eq('id', id);
   loadAll();
 }
 

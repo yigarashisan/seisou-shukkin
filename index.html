@@ -119,6 +119,8 @@ let myAssignments = [];
 let selectedAssignment = null;
 let recent = [];
 
+const WEEKDAY_LABELS = ['日', '月', '火', '水', '木', '金', '土'];
+
 function addHours(startTime, hours) {
   const [h, m] = startTime.split(':').map(Number);
   const totalMin = h * 60 + m + Math.round(hours * 60);
@@ -162,9 +164,19 @@ async function init() {
 
   const { data: asg } = await sb
     .from('assignments')
-    .select('*, locations(id, name)')
+    .select('*, location_schedules(day_of_week, start_time, standard_hours, location_id, locations(name))')
     .eq('employee_id', employee.id);
-  myAssignments = asg || [];
+
+  myAssignments = (asg || [])
+    .filter((a) => a.location_schedules)
+    .map((a) => ({
+      id: a.id,
+      location_id: a.location_schedules.location_id,
+      location_name: a.location_schedules.locations?.name ?? '?',
+      day_of_week: a.location_schedules.day_of_week,
+      start_time: a.location_schedules.start_time,
+      standard_hours: a.location_schedules.standard_hours,
+    }));
 
   if (myAssignments.length === 0) {
     renderError('担当する清掃場所がまだ登録されていません。管理者に確認してください。');
@@ -173,11 +185,13 @@ async function init() {
 
   await loadRecent();
 
-  if (myAssignments.length === 1) {
-    selectedAssignment = myAssignments[0];
+  const todayDow = new Date().getDay();
+  const todays = myAssignments.filter((a) => a.day_of_week === todayDow);
+  if (todays.length === 1) {
+    selectedAssignment = todays[0];
     renderConfirm();
   } else {
-    renderChoice();
+    renderChoice(todays.length > 0 ? todays : null);
   }
 }
 
@@ -195,19 +209,22 @@ function renderError(msg) {
   app.innerHTML = `<p class="errorBox">${msg}</p>`;
 }
 
-function renderChoice() {
+function renderChoice(list) {
+  const items = list || myAssignments;
+  const showAllLink = !!list && list.length < myAssignments.length;
   app.innerHTML = `
     <h1>${employee.name} さん</h1>
-    <p class="hello">本日の清掃場所を選んでください</p>
+    <p class="hello">${list ? '本日の清掃場所を選んでください' : '担当場所を選んでください'}</p>
     <div class="card">
-      ${myAssignments.map((a, i) => `<button class="locChoice" onclick="chooseAssignment(${i})">${a.locations.name}(${timeRangeLabel(a)})</button>`).join('')}
+      ${items.map((a) => `<button class="locChoice" onclick="chooseAssignment('${a.id}')">${a.location_name}(${WEEKDAY_LABELS[a.day_of_week]}曜 ${timeRangeLabel(a)})</button>`).join('')}
     </div>
+    ${showAllLink ? `<button class="linklike" onclick="renderChoice(myAssignments)">すべての担当から選ぶ</button>` : ''}
     ${renderHistoryHtml()}
   `;
 }
 
-function chooseAssignment(i) {
-  selectedAssignment = myAssignments[i];
+function chooseAssignment(id) {
+  selectedAssignment = myAssignments.find((a) => a.id === id);
   renderConfirm();
 }
 
@@ -230,10 +247,10 @@ async function renderConfirm() {
       <div class="card">
         <div class="doneIcon">✅</div>
         <div class="doneMsg">本日の記録は入力済みです</div>
-        <div class="doneSub">${selectedAssignment.locations.name} / ${recordDetailLabel(existing, selectedAssignment)}</div>
+        <div class="doneSub">${selectedAssignment.location_name} / ${recordDetailLabel(existing, selectedAssignment)}</div>
         <button class="linklike" onclick="deleteRecord('${existing.id}')">この記録を取り消す</button>
       </div>
-      ${myAssignments.length > 1 ? `<button class="linklike" onclick="renderChoice()">別の場所を記録する</button>` : ''}
+      ${myAssignments.length > 1 ? `<button class="linklike" onclick="renderChoice(myAssignments)">別の場所を記録する</button>` : ''}
       ${renderHistoryHtml()}
     `;
     return;
@@ -242,7 +259,7 @@ async function renderConfirm() {
   app.innerHTML = `
     <h1>${employee.name} さん</h1>
     <div class="card">
-      <div class="locName">${selectedAssignment.locations.name}</div>
+      <div class="locName">${selectedAssignment.location_name}</div>
       <div class="locHours">通常: ${timeRangeLabel(selectedAssignment)}</div>
       <button class="bigbtn" onclick="recordStandard()">出勤しました</button>
       <button class="linklike" id="toggleCorrect" onclick="toggleCorrectForm()">時間が違う場合はこちら</button>
@@ -256,7 +273,7 @@ async function renderConfirm() {
         <button class="bigbtn" onclick="recordCorrected()">この内容で記録する</button>
       </div>
     </div>
-    ${myAssignments.length > 1 ? `<button class="linklike" onclick="renderChoice()">別の場所を記録する</button>` : ''}
+    ${myAssignments.length > 1 ? `<button class="linklike" onclick="renderChoice(myAssignments)">別の場所を記録する</button>` : ''}
     ${renderHistoryHtml()}
   `;
 }
@@ -318,7 +335,9 @@ function renderHistoryHtml() {
     <div class="sectionTitle">最近の記録</div>
     <div class="card">
       ${recent.map((r) => {
-        const asg = myAssignments.find((a) => a.location_id === r.location_id);
+        const recordDow = new Date(r.date + 'T00:00:00').getDay();
+        const asg = myAssignments.find((a) => a.location_id === r.location_id && a.day_of_week === recordDow)
+          ?? myAssignments.find((a) => a.location_id === r.location_id);
         const detail = recordDetailLabel(r, asg);
         return `
         <div class="histRow">
