@@ -98,6 +98,14 @@
   <input id="newEmployeeName" placeholder="氏名(例: 山田 太郎)" />
   <button class="btn btn-primary" onclick="addEmployee()">追加</button>
 </div>
+<details style="margin-bottom: 16px;">
+  <summary style="cursor:pointer; color: var(--brown); font-size: 13px;">まとめて登録(CSV貼り付け)</summary>
+  <div class="form-card" style="margin-top: 8px; flex-direction: column; align-items: stretch;">
+    <textarea id="employeeCsv" rows="6" placeholder="コード,氏名&#10;E001,山田太郎&#10;E002,鈴木花子" style="width:100%; font-family: monospace; font-size: 13px;"></textarea>
+    <button class="btn btn-primary" style="margin-top: 8px;" onclick="importEmployeesCsv()">この内容で一括登録</button>
+    <div id="employeeImportResult" class="meta"></div>
+  </div>
+</details>
 <div id="employeeList"></div>
 
 <h2>清掃場所</h2>
@@ -106,6 +114,14 @@
   <input id="newLocationName" placeholder="場所名(例: 〇〇ビル)" />
   <button class="btn btn-primary" onclick="addLocation()">追加</button>
 </div>
+<details style="margin-bottom: 16px;">
+  <summary style="cursor:pointer; color: var(--brown); font-size: 13px;">まとめて登録(CSV貼り付け)</summary>
+  <div class="form-card" style="margin-top: 8px; flex-direction: column; align-items: stretch;">
+    <textarea id="locationCsv" rows="6" placeholder="コード,場所名&#10;L012,〇〇ビル&#10;L013,△△マンション" style="width:100%; font-family: monospace; font-size: 13px;"></textarea>
+    <button class="btn btn-primary" style="margin-top: 8px;" onclick="importLocationsCsv()">この内容で一括登録</button>
+    <div id="locationImportResult" class="meta"></div>
+  </div>
+</details>
 <div id="locationList"></div>
 
 <h2>担当(従業員 × 清掃場所)</h2>
@@ -116,6 +132,14 @@
   <input id="assignHours" type="number" step="0.1" placeholder="1回の清掃時間(例: 1.5)" />
   <button class="btn btn-primary" onclick="addAssignment()">追加</button>
 </div>
+<details style="margin-bottom: 16px;">
+  <summary style="cursor:pointer; color: var(--brown); font-size: 13px;">まとめて登録(CSV貼り付け)</summary>
+  <div class="form-card" style="margin-top: 8px; flex-direction: column; align-items: stretch;">
+    <textarea id="assignmentCsv" rows="6" placeholder="従業員コード,場所コード,開始時刻,清掃時間&#10;E001,L012,07:30,1.5" style="width:100%; font-family: monospace; font-size: 13px;"></textarea>
+    <button class="btn btn-primary" style="margin-top: 8px;" onclick="importAssignmentsCsv()">この内容で一括登録</button>
+    <div id="assignmentImportResult" class="meta"></div>
+  </div>
+</details>
 <div id="assignmentList"></div>
 
 <h2>今月の集計</h2>
@@ -182,6 +206,12 @@ function addHours(startTime, hours) {
   const endH = Math.floor((totalMin % 1440) / 60);
   const endM = totalMin % 60;
   return String(endH).padStart(2, '0') + ':' + String(endM).padStart(2, '0');
+}
+
+function parseCsvLines(text) {
+  const rows = text.split('\n').map((l) => l.trim()).filter((l) => l.length > 0).map((l) => l.split(',').map((c) => c.trim()));
+  if (rows.length && /コード|code/i.test(rows[0][0] || '')) rows.shift();
+  return rows;
 }
 
 function slugify() {
@@ -269,6 +299,22 @@ async function addEmployee() {
   loadAll();
 }
 
+async function importEmployeesCsv() {
+  const rows = parseCsvLines(document.getElementById('employeeCsv').value);
+  const existingCodes = new Set(employees.map((e) => e.code).filter(Boolean));
+  let added = 0, skipped = 0;
+  for (const [code, name] of rows) {
+    if (!code || !name) continue;
+    if (existingCodes.has(code)) { skipped++; continue; }
+    await sb.from('employees').insert({ code, name, slug: slugify() });
+    existingCodes.add(code);
+    added++;
+  }
+  document.getElementById('employeeImportResult').textContent = `${added}件登録、${skipped}件スキップ(既存コード)`;
+  document.getElementById('employeeCsv').value = '';
+  loadAll();
+}
+
 async function editEmployeeCode(id, current) {
   const code = prompt('コード番号を入力してください', current);
   if (code === null) return;
@@ -289,6 +335,22 @@ async function addLocation() {
   await sb.from('locations').insert({ name, code: code || null });
   document.getElementById('newLocationName').value = '';
   document.getElementById('newLocationCode').value = '';
+  loadAll();
+}
+
+async function importLocationsCsv() {
+  const rows = parseCsvLines(document.getElementById('locationCsv').value);
+  const existingCodes = new Set(locations.map((l) => l.code).filter(Boolean));
+  let added = 0, skipped = 0;
+  for (const [code, name] of rows) {
+    if (!code || !name) continue;
+    if (existingCodes.has(code)) { skipped++; continue; }
+    await sb.from('locations').insert({ code, name });
+    existingCodes.add(code);
+    added++;
+  }
+  document.getElementById('locationImportResult').textContent = `${added}件登録、${skipped}件スキップ(既存コード)`;
+  document.getElementById('locationCsv').value = '';
   loadAll();
 }
 
@@ -314,6 +376,36 @@ async function addAssignment() {
   await sb.from('assignments').insert({ employee_id, location_id, start_time, standard_hours });
   document.getElementById('assignHours').value = '';
   document.getElementById('assignStartTime').value = '';
+  loadAll();
+}
+
+async function importAssignmentsCsv() {
+  const rows = parseCsvLines(document.getElementById('assignmentCsv').value);
+  const empByCode = new Map(employees.filter((e) => e.code).map((e) => [e.code, e.id]));
+  const locByCode = new Map(locations.filter((l) => l.code).map((l) => [l.code, l.id]));
+  const existingPairs = new Set(assignments.map((a) => a.employee_id + '|' + a.location_id));
+  let added = 0;
+  const errors = [];
+  for (const [empCode, locCode, startTime, hoursStr] of rows) {
+    if (!empCode || !locCode) continue;
+    const employee_id = empByCode.get(empCode);
+    const location_id = locByCode.get(locCode);
+    const standard_hours = parseFloat(hoursStr);
+    if (!employee_id || !location_id) {
+      errors.push(`${empCode},${locCode}: 該当する従業員コードまたは場所コードが見つかりません`);
+      continue;
+    }
+    if (!standard_hours) {
+      errors.push(`${empCode},${locCode}: 清掃時間が不正です`);
+      continue;
+    }
+    if (existingPairs.has(employee_id + '|' + location_id)) continue;
+    await sb.from('assignments').insert({ employee_id, location_id, start_time: startTime || null, standard_hours });
+    existingPairs.add(employee_id + '|' + location_id);
+    added++;
+  }
+  document.getElementById('assignmentImportResult').innerHTML = `${added}件登録` + (errors.length ? `<br>確認が必要: ${errors.length}件<br>${errors.join('<br>')}` : '');
+  document.getElementById('assignmentCsv').value = '';
   loadAll();
 }
 
