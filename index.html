@@ -1,0 +1,342 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>清掃出勤管理</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+<style>
+  :root {
+    --bg: #F5F0E5;
+    --surface: #FFFFFF;
+    --border: #E8DDC8;
+    --field: #F8F3E8;
+    --ink: #3A342E;
+    --muted: #6B7A8D;
+    --brown: #7c5d48;
+    --pink: #F0A8C4;
+    --coral: #F7877C;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "Hiragino Kaku Gothic ProN", sans-serif;
+    padding: 24px 18px 50px;
+    -webkit-text-size-adjust: 100%;
+  }
+  .wrap { max-width: 420px; margin: 0 auto; }
+  h1 { font-size: 18px; text-align: center; margin: 0 0 4px; color: var(--muted); }
+  .hello { font-size: 22px; font-weight: 700; text-align: center; margin: 0 0 24px; }
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 18px;
+    padding: 20px;
+    margin-bottom: 16px;
+  }
+  .locName { font-size: 20px; font-weight: 700; text-align: center; margin-bottom: 4px; }
+  .locHours { text-align: center; color: var(--muted); font-size: 14px; margin-bottom: 18px; }
+  .bigbtn {
+    display: block;
+    width: 100%;
+    background: var(--pink);
+    color: #fff;
+    border: none;
+    border-radius: 14px;
+    padding: 20px;
+    font-size: 19px;
+    font-weight: 700;
+    cursor: pointer;
+  }
+  .bigbtn:active { opacity: 0.85; }
+  .locChoice {
+    display: block;
+    width: 100%;
+    background: var(--field);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 16px;
+    font-size: 16px;
+    font-weight: 600;
+    margin-bottom: 10px;
+    cursor: pointer;
+    text-align: left;
+  }
+  .linklike {
+    display: block;
+    text-align: center;
+    color: var(--brown);
+    font-size: 13px;
+    margin-top: 14px;
+    background: none;
+    border: none;
+    text-decoration: underline;
+    cursor: pointer;
+  }
+  .correctForm { margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--border); }
+  .correctForm label { font-size: 12px; color: var(--muted); display: block; margin-bottom: 4px; }
+  .correctForm input, .correctForm textarea {
+    width: 100%;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 10px;
+    font-size: 14px;
+    margin-bottom: 10px;
+    background: var(--field);
+  }
+  .doneIcon { font-size: 48px; text-align: center; margin-bottom: 8px; }
+  .doneMsg { text-align: center; font-size: 16px; font-weight: 700; margin-bottom: 4px; }
+  .doneSub { text-align: center; font-size: 13px; color: var(--muted); }
+  .sectionTitle { font-size: 12px; color: var(--muted); font-weight: 600; margin: 24px 0 8px; }
+  .histRow {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 10px 0; border-bottom: 1px solid #F3EFE4; font-size: 13px;
+  }
+  .histRow:last-child { border-bottom: none; }
+  .histDate { color: var(--ink); font-weight: 600; }
+  .histDetail { color: var(--muted); font-size: 12px; margin-top: 2px; }
+  .histActions button {
+    border: none; background: none; font-size: 12px; color: var(--brown); cursor: pointer; margin-left: 8px;
+  }
+  .errorBox { text-align: center; color: var(--muted); padding: 40px 20px; }
+</style>
+</head>
+<body>
+<div class="wrap" id="app">
+  <p class="errorBox">読み込み中...</p>
+</div>
+
+<script src="supabase-config.js"></script>
+<script>
+const params = new URLSearchParams(window.location.search);
+const slug = params.get('e');
+const app = document.getElementById('app');
+
+let employee = null;
+let myAssignments = [];
+let selectedAssignment = null;
+let recent = [];
+
+function addHours(startTime, hours) {
+  const [h, m] = startTime.split(':').map(Number);
+  const totalMin = h * 60 + m + Math.round(hours * 60);
+  const endH = Math.floor((totalMin % 1440) / 60);
+  const endM = totalMin % 60;
+  return String(endH).padStart(2, '0') + ':' + String(endM).padStart(2, '0');
+}
+
+function timeRangeLabel(a) {
+  if (!a.start_time) return `通常: ${a.standard_hours}時間`;
+  return `${a.start_time}〜${addHours(a.start_time, a.standard_hours)}`;
+}
+
+function diffHours(startTime, endTime) {
+  const [sh, sm] = startTime.split(':').map(Number);
+  const [eh, em] = endTime.split(':').map(Number);
+  let diffMin = (eh * 60 + em) - (sh * 60 + sm);
+  if (diffMin < 0) diffMin += 1440;
+  return diffMin / 60;
+}
+
+function recordDetailLabel(r, asg) {
+  if (r.is_standard) return asg ? timeRangeLabel(asg) : `${r.hours}時間`;
+  if (r.actual_start_time && r.actual_end_time) {
+    return `${r.actual_start_time}〜${r.actual_end_time}(通常と違う: ${r.reason ?? ''})`;
+  }
+  return `${r.hours}時間(通常と違う: ${r.reason ?? ''})`;
+}
+
+function todayStr() {
+  const d = new Date();
+  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+}
+
+async function init() {
+  if (!slug) { renderError('リンクが正しくないようです。管理者に確認してください。'); return; }
+
+  const { data: emp } = await sb.from('employees').select('*').eq('slug', slug).maybeSingle();
+  if (!emp) { renderError('あなたの情報が見つかりませんでした。管理者に確認してください。'); return; }
+  employee = emp;
+
+  const { data: asg } = await sb
+    .from('assignments')
+    .select('*, locations(id, name)')
+    .eq('employee_id', employee.id);
+  myAssignments = asg || [];
+
+  if (myAssignments.length === 0) {
+    renderError('担当する清掃場所がまだ登録されていません。管理者に確認してください。');
+    return;
+  }
+
+  await loadRecent();
+
+  if (myAssignments.length === 1) {
+    selectedAssignment = myAssignments[0];
+    renderConfirm();
+  } else {
+    renderChoice();
+  }
+}
+
+async function loadRecent() {
+  const { data } = await sb
+    .from('attendance_records')
+    .select('*, locations(name)')
+    .eq('employee_id', employee.id)
+    .order('date', { ascending: false })
+    .limit(10);
+  recent = data || [];
+}
+
+function renderError(msg) {
+  app.innerHTML = `<p class="errorBox">${msg}</p>`;
+}
+
+function renderChoice() {
+  app.innerHTML = `
+    <h1>${employee.name} さん</h1>
+    <p class="hello">本日の清掃場所を選んでください</p>
+    <div class="card">
+      ${myAssignments.map((a, i) => `<button class="locChoice" onclick="chooseAssignment(${i})">${a.locations.name}(${timeRangeLabel(a)})</button>`).join('')}
+    </div>
+    ${renderHistoryHtml()}
+  `;
+}
+
+function chooseAssignment(i) {
+  selectedAssignment = myAssignments[i];
+  renderConfirm();
+}
+
+async function checkExistingToday() {
+  const { data } = await sb
+    .from('attendance_records')
+    .select('*')
+    .eq('employee_id', employee.id)
+    .eq('location_id', selectedAssignment.location_id)
+    .eq('date', todayStr())
+    .maybeSingle();
+  return data;
+}
+
+async function renderConfirm() {
+  const existing = await checkExistingToday();
+  if (existing) {
+    app.innerHTML = `
+      <h1>${employee.name} さん</h1>
+      <div class="card">
+        <div class="doneIcon">✅</div>
+        <div class="doneMsg">本日の記録は入力済みです</div>
+        <div class="doneSub">${selectedAssignment.locations.name} / ${recordDetailLabel(existing, selectedAssignment)}</div>
+        <button class="linklike" onclick="deleteRecord('${existing.id}')">この記録を取り消す</button>
+      </div>
+      ${myAssignments.length > 1 ? `<button class="linklike" onclick="renderChoice()">別の場所を記録する</button>` : ''}
+      ${renderHistoryHtml()}
+    `;
+    return;
+  }
+
+  app.innerHTML = `
+    <h1>${employee.name} さん</h1>
+    <div class="card">
+      <div class="locName">${selectedAssignment.locations.name}</div>
+      <div class="locHours">通常: ${timeRangeLabel(selectedAssignment)}</div>
+      <button class="bigbtn" onclick="recordStandard()">出勤しました</button>
+      <button class="linklike" id="toggleCorrect" onclick="toggleCorrectForm()">時間が違う場合はこちら</button>
+      <div id="correctForm" style="display:none;" class="correctForm">
+        <label>開始時刻</label>
+        <input id="actualStart" type="time" value="${selectedAssignment.start_time ?? ''}" />
+        <label>終了時刻</label>
+        <input id="actualEnd" type="time" value="${selectedAssignment.start_time ? addHours(selectedAssignment.start_time, selectedAssignment.standard_hours) : ''}" />
+        <label>理由</label>
+        <textarea id="reason" rows="2" placeholder="例: ゴミが多かったため延長"></textarea>
+        <button class="bigbtn" onclick="recordCorrected()">この内容で記録する</button>
+      </div>
+    </div>
+    ${myAssignments.length > 1 ? `<button class="linklike" onclick="renderChoice()">別の場所を記録する</button>` : ''}
+    ${renderHistoryHtml()}
+  `;
+}
+
+function toggleCorrectForm() {
+  const el = document.getElementById('correctForm');
+  el.style.display = el.style.display === 'none' ? 'block' : 'none';
+}
+
+async function recordStandard() {
+  const { error } = await sb.from('attendance_records').insert({
+    employee_id: employee.id,
+    location_id: selectedAssignment.location_id,
+    date: todayStr(),
+    hours: selectedAssignment.standard_hours,
+    is_standard: true,
+  });
+  if (error) { alert('記録できませんでした: ' + error.message); return; }
+  await afterRecord();
+}
+
+async function recordCorrected() {
+  const actualStart = document.getElementById('actualStart').value;
+  const actualEnd = document.getElementById('actualEnd').value;
+  const reason = document.getElementById('reason').value.trim();
+  if (!actualStart || !actualEnd) { alert('開始時刻・終了時刻を入力してください'); return; }
+  if (!reason) { alert('理由を入力してください'); return; }
+  const hours = diffHours(actualStart, actualEnd);
+  if (hours <= 0) { alert('終了時刻は開始時刻より後にしてください'); return; }
+  const { error } = await sb.from('attendance_records').insert({
+    employee_id: employee.id,
+    location_id: selectedAssignment.location_id,
+    date: todayStr(),
+    hours,
+    is_standard: false,
+    reason,
+    actual_start_time: actualStart,
+    actual_end_time: actualEnd,
+  });
+  if (error) { alert('記録できませんでした: ' + error.message); return; }
+  await afterRecord();
+}
+
+async function afterRecord() {
+  await loadRecent();
+  renderConfirm();
+}
+
+async function deleteRecord(id) {
+  if (!confirm('この記録を取り消しますか?')) return;
+  await sb.from('attendance_records').delete().eq('id', id);
+  await loadRecent();
+  renderConfirm();
+}
+
+function renderHistoryHtml() {
+  if (recent.length === 0) return '';
+  return `
+    <div class="sectionTitle">最近の記録</div>
+    <div class="card">
+      ${recent.map((r) => {
+        const asg = myAssignments.find((a) => a.location_id === r.location_id);
+        const detail = recordDetailLabel(r, asg);
+        return `
+        <div class="histRow">
+          <div>
+            <div class="histDate">${r.date}</div>
+            <div class="histDetail">${r.locations?.name ?? ''} / ${detail}</div>
+          </div>
+          <div class="histActions">
+            <button onclick="deleteRecord('${r.id}')">取消</button>
+          </div>
+        </div>
+      `;
+      }).join('')}
+    </div>
+  `;
+}
+
+init();
+</script>
+</body>
+</html>
