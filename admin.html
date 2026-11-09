@@ -344,7 +344,8 @@ async function addSchedule() {
   const standard_hours = parseFloat(document.getElementById('scheduleHours').value);
   const break_minutes = parseInt(document.getElementById('scheduleBreak').value, 10) || 0;
   if (!location_id || !start_time || !standard_hours) { alert('場所・開始時刻・清掃時間を入力してください'); return; }
-  await sb.from('location_schedules').insert({ location_id, day_of_week, start_time, standard_hours, break_minutes });
+  const { error } = await sb.from('location_schedules').insert({ location_id, day_of_week, start_time, standard_hours, break_minutes });
+  if (error) { alert('登録できませんでした: ' + error.message); return; }
   document.getElementById('scheduleStartTime').value = '';
   document.getElementById('scheduleHours').value = '';
   document.getElementById('scheduleBreak').value = '';
@@ -416,7 +417,8 @@ async function addEmployee() {
   const name = document.getElementById('newEmployeeName').value.trim();
   const code = document.getElementById('newEmployeeCode').value.trim();
   if (!name) return;
-  await sb.from('employees').insert({ name, code: code || null, slug: slugify() });
+  const { error } = await sb.from('employees').insert({ name, code: code || null, slug: slugify() });
+  if (error) { alert('登録できませんでした: ' + error.message); return; }
   document.getElementById('newEmployeeName').value = '';
   document.getElementById('newEmployeeCode').value = '';
   loadAll();
@@ -455,7 +457,8 @@ async function addLocation() {
   const name = document.getElementById('newLocationName').value.trim();
   const code = document.getElementById('newLocationCode').value.trim();
   if (!name) return;
-  await sb.from('locations').insert({ name, code: code || null });
+  const { error } = await sb.from('locations').insert({ name, code: code || null });
+  if (error) { alert('登録できませんでした: ' + error.message); return; }
   document.getElementById('newLocationName').value = '';
   document.getElementById('newLocationCode').value = '';
   loadAll();
@@ -494,7 +497,8 @@ async function addAssignment() {
   const employee_id = document.getElementById('assignEmployee').value;
   const schedule_id = document.getElementById('assignSchedule').value;
   if (!employee_id || !schedule_id) { alert('従業員とスケジュールを選択してください'); return; }
-  await sb.from('assignments').insert({ employee_id, schedule_id });
+  const { error } = await sb.from('assignments').insert({ employee_id, schedule_id });
+  if (error) { alert('登録できませんでした: ' + error.message); return; }
   loadAll();
 }
 
