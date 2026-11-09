@@ -129,9 +129,14 @@ function addHours(startTime, hours) {
   return String(endH).padStart(2, '0') + ':' + String(endM).padStart(2, '0');
 }
 
+function computeEndTime(startTime, hours, breakMinutes) {
+  return addHours(startTime, hours + (breakMinutes || 0) / 60);
+}
+
 function timeRangeLabel(a) {
   if (!a.start_time) return `通常: ${a.standard_hours}時間`;
-  return `${a.start_time}〜${addHours(a.start_time, a.standard_hours)}`;
+  const range = `${a.start_time}〜${computeEndTime(a.start_time, a.standard_hours, a.break_minutes)}`;
+  return a.break_minutes ? `${range}(休憩${a.break_minutes}分)` : range;
 }
 
 function diffHours(startTime, endTime) {
@@ -145,7 +150,8 @@ function diffHours(startTime, endTime) {
 function recordDetailLabel(r, asg) {
   if (r.is_standard) return asg ? timeRangeLabel(asg) : `${r.hours}時間`;
   if (r.actual_start_time && r.actual_end_time) {
-    return `${r.actual_start_time}〜${r.actual_end_time}(通常と違う: ${r.reason ?? ''})`;
+    const breakInfo = r.actual_break_minutes ? `、休憩${r.actual_break_minutes}分` : '';
+    return `${r.actual_start_time}〜${r.actual_end_time}${breakInfo}(通常と違う: ${r.reason ?? ''})`;
   }
   return `${r.hours}時間(通常と違う: ${r.reason ?? ''})`;
 }
@@ -164,7 +170,7 @@ async function init() {
 
   const { data: asg } = await sb
     .from('assignments')
-    .select('*, location_schedules(day_of_week, start_time, standard_hours, location_id, locations(name))')
+    .select('*, location_schedules(day_of_week, start_time, standard_hours, break_minutes, location_id, locations(name))')
     .eq('employee_id', employee.id);
 
   myAssignments = (asg || [])
@@ -176,6 +182,7 @@ async function init() {
       day_of_week: a.location_schedules.day_of_week,
       start_time: a.location_schedules.start_time,
       standard_hours: a.location_schedules.standard_hours,
+      break_minutes: a.location_schedules.break_minutes || 0,
     }));
 
   if (myAssignments.length === 0) {
@@ -267,7 +274,9 @@ async function renderConfirm() {
         <label>開始時刻</label>
         <input id="actualStart" type="time" value="${selectedAssignment.start_time ?? ''}" />
         <label>終了時刻</label>
-        <input id="actualEnd" type="time" value="${selectedAssignment.start_time ? addHours(selectedAssignment.start_time, selectedAssignment.standard_hours) : ''}" />
+        <input id="actualEnd" type="time" value="${selectedAssignment.start_time ? computeEndTime(selectedAssignment.start_time, selectedAssignment.standard_hours, selectedAssignment.break_minutes) : ''}" />
+        <label>休憩時間(分)</label>
+        <input id="actualBreak" type="number" step="1" value="${selectedAssignment.break_minutes || 0}" />
         <label>理由</label>
         <textarea id="reason" rows="2" placeholder="例: ゴミが多かったため延長"></textarea>
         <button class="bigbtn" onclick="recordCorrected()">この内容で記録する</button>
@@ -298,11 +307,12 @@ async function recordStandard() {
 async function recordCorrected() {
   const actualStart = document.getElementById('actualStart').value;
   const actualEnd = document.getElementById('actualEnd').value;
+  const actualBreak = parseInt(document.getElementById('actualBreak').value, 10) || 0;
   const reason = document.getElementById('reason').value.trim();
   if (!actualStart || !actualEnd) { alert('開始時刻・終了時刻を入力してください'); return; }
   if (!reason) { alert('理由を入力してください'); return; }
-  const hours = diffHours(actualStart, actualEnd);
-  if (hours <= 0) { alert('終了時刻は開始時刻より後にしてください'); return; }
+  const hours = diffHours(actualStart, actualEnd) - actualBreak / 60;
+  if (hours <= 0) { alert('休憩を引いた実働時間が0以下になっています。時刻・休憩時間を見直してください'); return; }
   const { error } = await sb.from('attendance_records').insert({
     employee_id: employee.id,
     location_id: selectedAssignment.location_id,
@@ -312,6 +322,7 @@ async function recordCorrected() {
     reason,
     actual_start_time: actualStart,
     actual_end_time: actualEnd,
+    actual_break_minutes: actualBreak,
   });
   if (error) { alert('記録できませんでした: ' + error.message); return; }
   await afterRecord();
