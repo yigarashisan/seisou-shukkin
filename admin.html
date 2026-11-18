@@ -162,8 +162,8 @@
 <details style="margin-bottom: 16px;">
   <summary style="cursor:pointer; color: var(--brown); font-size: 13px;">まとめて登録(CSV貼り付け)</summary>
   <div class="form-card" style="margin-top: 8px; flex-direction: column; align-items: stretch;">
-    <textarea id="assignmentCsv" rows="6" placeholder="従業員コード,場所コード,曜日,開始時刻&#10;E001,L012,月,07:30" style="width:100%; font-family: monospace; font-size: 13px;"></textarea>
-    <p class="meta">「場所コード,曜日,開始時刻」が、上で登録済みのスケジュールと一致する必要があります</p>
+    <textarea id="assignmentCsv" rows="6" placeholder="従業員コード,場所コード,曜日,開始時刻,清掃時間&#10;E001,L012,月,07:30,3&#10;E002,L012,月,07:30,6" style="width:100%; font-family: monospace; font-size: 13px;"></textarea>
+    <p class="meta">「場所コード,曜日,開始時刻」が、上で登録済みのスケジュールと一致する必要があります。同じ場所・曜日・開始時刻で清掃時間違いのスケジュールが複数ある場合は、最後の「清掃時間」列で区別します(1つしかない場合は省略可)</p>
     <button class="btn btn-primary" style="margin-top: 8px;" onclick="importAssignmentsCsv()">この内容で一括登録</button>
     <div id="assignmentImportResult" class="meta"></div>
   </div>
@@ -509,14 +509,28 @@ async function importAssignmentsCsv() {
   const existingPairs = new Set(assignments.map((a) => a.employee_id + '|' + a.schedule_id));
   let added = 0;
   const errors = [];
-  for (const [empCode, locCode, dayStr, startTime] of rows) {
+  for (const [empCode, locCode, dayStr, startTime, hoursStr] of rows) {
     if (!empCode || !locCode) continue;
     const employee_id = empByCode.get(empCode);
     const location_id = locByCode.get(locCode);
     const day_of_week = WEEKDAY_LABELS.indexOf(dayStr);
-    const schedule = schedules.find((s) => s.location_id === location_id && s.day_of_week === day_of_week && s.start_time === startTime);
+    const standard_hours = parseFloat(hoursStr);
+    // Matched on hours too, not just location+day+start_time — the same
+    // location/day/start can have multiple schedules (e.g. a 3-hour slot and
+    // a 6-hour slot both starting at 7:30), so start_time alone is ambiguous.
+    const candidates = schedules.filter(
+      (s) => s.location_id === location_id && s.day_of_week === day_of_week && s.start_time === startTime
+    );
+    const schedule = standard_hours
+      ? candidates.find((s) => Number(s.standard_hours) === standard_hours)
+      : candidates.length === 1
+        ? candidates[0]
+        : undefined;
     if (!employee_id || !schedule) {
-      errors.push(`${empCode},${locCode},${dayStr},${startTime}: 該当する従業員またはスケジュールが見つかりません`);
+      const reason = candidates.length > 1 && !standard_hours
+        ? '同じ場所・曜日・開始時刻のスケジュールが複数あるため、清掃時間の列で指定してください'
+        : '該当する従業員またはスケジュールが見つかりません';
+      errors.push(`${empCode},${locCode},${dayStr},${startTime}: ${reason}`);
       continue;
     }
     if (existingPairs.has(employee_id + '|' + schedule.id)) continue;
