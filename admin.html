@@ -145,7 +145,7 @@
   <summary style="cursor:pointer; color: var(--brown); font-size: 13px;">まとめて登録(CSV貼り付け)</summary>
   <div class="form-card" style="margin-top: 8px; flex-direction: column; align-items: stretch;">
     <textarea id="scheduleCsv" rows="6" placeholder="場所コード,曜日,開始時刻,清掃時間,休憩(分)&#10;L012,月,07:30,1.5,0&#10;L012,水,07:30,2.5,30" style="width:100%; font-family: monospace; font-size: 13px;"></textarea>
-    <p class="meta">曜日は 月火水木金土日 の1文字で入力してください。休憩がない場合は 0 と入力してください</p>
+    <p class="meta">曜日は 月火水木金土日 の1文字で入力してください。休憩がない場合は 0 と入力してください。場所コードの後ろに場所名の列を入れても自動で無視されます</p>
     <button class="btn btn-primary" style="margin-top: 8px;" onclick="importSchedulesCsv()">この内容で一括登録</button>
     <div id="scheduleImportResult" class="meta"></div>
   </div>
@@ -163,7 +163,7 @@
   <summary style="cursor:pointer; color: var(--brown); font-size: 13px;">まとめて登録(CSV貼り付け)</summary>
   <div class="form-card" style="margin-top: 8px; flex-direction: column; align-items: stretch;">
     <textarea id="assignmentCsv" rows="6" placeholder="従業員コード,場所コード,曜日,開始時刻,清掃時間&#10;E001,L012,月,07:30,3&#10;E002,L012,月,07:30,6" style="width:100%; font-family: monospace; font-size: 13px;"></textarea>
-    <p class="meta">「場所コード,曜日,開始時刻」が、上で登録済みのスケジュールと一致する必要があります。同じ場所・曜日・開始時刻で清掃時間違いのスケジュールが複数ある場合は、最後の「清掃時間」列で区別します(1つしかない場合は省略可)</p>
+    <p class="meta">「場所コード,曜日,開始時刻」が、上で登録済みのスケジュールと一致する必要があります。同じ場所・曜日・開始時刻で清掃時間違いのスケジュールが複数ある場合は、最後の「清掃時間」列で区別します(1つしかない場合は省略可)。従業員コード・場所コードの後ろに名前の列を入れても自動で無視されます</p>
     <button class="btn btn-primary" style="margin-top: 8px;" onclick="importAssignmentsCsv()">この内容で一括登録</button>
     <div id="assignmentImportResult" class="meta"></div>
   </div>
@@ -247,6 +247,12 @@ function parseCsvLines(text) {
   const rows = text.split('\n').map((l) => l.trim()).filter((l) => l.length > 0).map((l) => l.split(',').map((c) => c.trim()));
   if (rows.length && /コード|code/i.test(rows[0][0] || '')) rows.shift();
   return rows;
+}
+
+// 場所名・従業員名などの任意の列が紛れ込んでいても、曜日(月火水木金土日の1文字)の
+// 位置を探すことでズレを吸収する。見つからなければ -1
+function findDayIndex(cols) {
+  return cols.findIndex((c) => WEEKDAY_LABELS.includes(c));
 }
 
 function slugify() {
@@ -357,14 +363,20 @@ async function importSchedulesCsv() {
   const locByCode = new Map(locations.filter((l) => l.code).map((l) => [l.code, l.id]));
   let added = 0;
   const errors = [];
-  for (const [locCode, dayStr, startTime, hoursStr, breakStr] of rows) {
+  for (const cols of rows) {
+    const locCode = cols[0];
     if (!locCode) continue;
+    const dayIdx = findDayIndex(cols);
+    const dayStr = dayIdx >= 0 ? cols[dayIdx] : undefined;
+    const startTime = dayIdx >= 0 ? cols[dayIdx + 1] : undefined;
+    const hoursStr = dayIdx >= 0 ? cols[dayIdx + 2] : undefined;
+    const breakStr = dayIdx >= 0 ? cols[dayIdx + 3] : undefined;
     const location_id = locByCode.get(locCode);
-    const day_of_week = WEEKDAY_LABELS.indexOf(dayStr);
+    const day_of_week = dayStr ? WEEKDAY_LABELS.indexOf(dayStr) : -1;
     const standard_hours = parseFloat(hoursStr);
     const break_minutes = parseInt(breakStr, 10) || 0;
     if (!location_id || day_of_week < 0 || !startTime || !standard_hours) {
-      errors.push(`${locCode},${dayStr}: 内容を確認してください(場所コード・曜日・時刻・時間)`);
+      errors.push(`${locCode},${dayStr ?? '?'}: 内容を確認してください(場所コード・曜日・時刻・時間)`);
       continue;
     }
     await sb.from('location_schedules').insert({ location_id, day_of_week, start_time: startTime, standard_hours, break_minutes });
@@ -509,11 +521,17 @@ async function importAssignmentsCsv() {
   const existingPairs = new Set(assignments.map((a) => a.employee_id + '|' + a.schedule_id));
   let added = 0;
   const errors = [];
-  for (const [empCode, locCode, dayStr, startTime, hoursStr] of rows) {
+  for (const cols of rows) {
+    const empCode = cols[0];
+    const locCode = cols[1];
     if (!empCode || !locCode) continue;
+    const dayIdx = findDayIndex(cols);
+    const dayStr = dayIdx >= 0 ? cols[dayIdx] : undefined;
+    const startTime = dayIdx >= 0 ? cols[dayIdx + 1] : undefined;
+    const hoursStr = dayIdx >= 0 ? cols[dayIdx + 2] : undefined;
     const employee_id = empByCode.get(empCode);
     const location_id = locByCode.get(locCode);
-    const day_of_week = WEEKDAY_LABELS.indexOf(dayStr);
+    const day_of_week = dayStr ? WEEKDAY_LABELS.indexOf(dayStr) : -1;
     const standard_hours = parseFloat(hoursStr);
     // Matched on hours too, not just location+day+start_time — the same
     // location/day/start can have multiple schedules (e.g. a 3-hour slot and
@@ -530,7 +548,7 @@ async function importAssignmentsCsv() {
       const reason = candidates.length > 1 && !standard_hours
         ? '同じ場所・曜日・開始時刻のスケジュールが複数あるため、清掃時間の列で指定してください'
         : '該当する従業員またはスケジュールが見つかりません';
-      errors.push(`${empCode},${locCode},${dayStr},${startTime}: ${reason}`);
+      errors.push(`${empCode},${locCode},${dayStr ?? '?'},${startTime ?? '?'}: ${reason}`);
       continue;
     }
     if (existingPairs.has(employee_id + '|' + schedule.id)) continue;
