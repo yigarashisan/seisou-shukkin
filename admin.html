@@ -641,11 +641,14 @@ function copyLink(slug) {
   navigator.clipboard.writeText(link).then(() => alert('リンクをコピーしました')).catch(() => prompt('コピーしてください', link));
 }
 
+function localDateStr(x) {
+  return x.getFullYear() + '-' + String(x.getMonth() + 1).padStart(2, '0') + '-' + String(x.getDate()).padStart(2, '0');
+}
+
 function monthRange(d) {
   const start = new Date(d.getFullYear(), d.getMonth(), 1);
   const end = new Date(d.getFullYear(), d.getMonth() + 1, 1);
-  const fmt = (x) => x.toISOString().slice(0, 10);
-  return { start: fmt(start), end: fmt(end) };
+  return { start: localDateStr(start), end: localDateStr(end) };
 }
 
 function changeMonth(delta) {
