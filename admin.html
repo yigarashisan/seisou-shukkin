@@ -270,6 +270,8 @@ async function loadAll() {
     sb.from('location_schedules').select('*, locations(name)'),
     sb.from('assignments').select('*, employees(name), location_schedules(day_of_week, start_time, standard_hours, break_minutes, location_id, locations(name))'),
   ]);
+  const loadErrors = [e, l, s, a].map((r) => r.error).filter(Boolean);
+  if (loadErrors.length) alert('データの読み込みに失敗しました: ' + loadErrors.map((err) => err.message).join(' / '));
   employees = e.data || [];
   locations = l.data || [];
   schedules = s.data || [];
@@ -379,7 +381,8 @@ async function importSchedulesCsv() {
       errors.push(`${locCode},${dayStr ?? '?'}: 内容を確認してください(場所コード・曜日・時刻・時間)`);
       continue;
     }
-    await sb.from('location_schedules').insert({ location_id, day_of_week, start_time: startTime, standard_hours, break_minutes });
+    const { error } = await sb.from('location_schedules').insert({ location_id, day_of_week, start_time: startTime, standard_hours, break_minutes });
+    if (error) { errors.push(`${locCode},${dayStr}: ${error.message}`); continue; }
     added++;
   }
   document.getElementById('scheduleImportResult').innerHTML = `${added}件登録` + (errors.length ? `<br>確認が必要: ${errors.length}件<br>${errors.join('<br>')}` : '');
@@ -440,14 +443,16 @@ async function importEmployeesCsv() {
   const rows = parseCsvLines(document.getElementById('employeeCsv').value);
   const existingCodes = new Set(employees.map((e) => e.code).filter(Boolean));
   let added = 0, skipped = 0;
+  const errors = [];
   for (const [code, name] of rows) {
     if (!code || !name) continue;
     if (existingCodes.has(code)) { skipped++; continue; }
-    await sb.from('employees').insert({ code, name, slug: slugify() });
+    const { error } = await sb.from('employees').insert({ code, name, slug: slugify() });
+    if (error) { errors.push(`${code},${name}: ${error.message}`); continue; }
     existingCodes.add(code);
     added++;
   }
-  document.getElementById('employeeImportResult').textContent = `${added}件登録、${skipped}件スキップ(既存コード)`;
+  document.getElementById('employeeImportResult').innerHTML = `${added}件登録、${skipped}件スキップ(既存コード)` + (errors.length ? `<br>失敗: ${errors.length}件<br>${errors.join('<br>')}` : '');
   document.getElementById('employeeCsv').value = '';
   loadAll();
 }
@@ -480,14 +485,16 @@ async function importLocationsCsv() {
   const rows = parseCsvLines(document.getElementById('locationCsv').value);
   const existingCodes = new Set(locations.map((l) => l.code).filter(Boolean));
   let added = 0, skipped = 0;
+  const errors = [];
   for (const [code, name] of rows) {
     if (!code || !name) continue;
     if (existingCodes.has(code)) { skipped++; continue; }
-    await sb.from('locations').insert({ code, name });
+    const { error } = await sb.from('locations').insert({ code, name });
+    if (error) { errors.push(`${code},${name}: ${error.message}`); continue; }
     existingCodes.add(code);
     added++;
   }
-  document.getElementById('locationImportResult').textContent = `${added}件登録、${skipped}件スキップ(既存コード)`;
+  document.getElementById('locationImportResult').innerHTML = `${added}件登録、${skipped}件スキップ(既存コード)` + (errors.length ? `<br>失敗: ${errors.length}件<br>${errors.join('<br>')}` : '');
   document.getElementById('locationCsv').value = '';
   loadAll();
 }
@@ -552,7 +559,8 @@ async function importAssignmentsCsv() {
       continue;
     }
     if (existingPairs.has(employee_id + '|' + schedule.id)) continue;
-    await sb.from('assignments').insert({ employee_id, schedule_id: schedule.id });
+    const { error } = await sb.from('assignments').insert({ employee_id, schedule_id: schedule.id });
+    if (error) { errors.push(`${empCode},${locCode},${dayStr}: ${error.message}`); continue; }
     existingPairs.add(employee_id + '|' + schedule.id);
     added++;
   }
