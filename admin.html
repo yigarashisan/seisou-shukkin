@@ -214,6 +214,7 @@
   <strong id="auditMonthLabel"></strong>
   <button onclick="changeAuditMonth(1)">翌月 ›</button>
 </div>
+<p class="meta" style="margin-top: 4px;">この清掃場所の1か月合計: <strong id="auditMonthTotal">-</strong></p>
 <div id="auditGrid"></div>
 <div class="card" id="auditDetail"></div>
 
@@ -738,7 +739,7 @@ async function renderAudit() {
   document.getElementById('auditMonthLabel').textContent = auditMonth.getFullYear() + '年' + (auditMonth.getMonth() + 1) + '月';
   const gridEl = document.getElementById('auditGrid');
   const locationId = document.getElementById('auditLocation').value;
-  if (!locationId) { gridEl.innerHTML = '<p class="empty">清掃場所がありません</p>'; document.getElementById('auditDetail').innerHTML = ''; return; }
+  if (!locationId) { gridEl.innerHTML = '<p class="empty">清掃場所がありません</p>'; document.getElementById('auditDetail').innerHTML = ''; document.getElementById('auditMonthTotal').textContent = '-'; return; }
   const loc = locations.find((l) => l.id === locationId);
 
   const { start, end } = monthRange(auditMonth);
@@ -746,7 +747,7 @@ async function renderAudit() {
     sb.from('attendance_records').select('*, employees(name)').eq('location_id', locationId).gte('date', start).lt('date', end),
     loc?.closed_on_holidays ? getHolidaySet(auditMonth.getFullYear()) : Promise.resolve(new Set()),
   ]);
-  if (error) { gridEl.innerHTML = `<p class="empty">読み込みエラー: ${error.message}</p>`; document.getElementById('auditDetail').innerHTML = ''; return; }
+  if (error) { gridEl.innerHTML = `<p class="empty">読み込みエラー: ${error.message}</p>`; document.getElementById('auditDetail').innerHTML = ''; document.getElementById('auditMonthTotal').textContent = '-'; return; }
 
   const recordsByDate = new Map();
   for (const r of records || []) {
@@ -804,6 +805,8 @@ async function renderAudit() {
   }
 
   if (auditSelectedDate && !auditDayInfo.has(auditSelectedDate)) auditSelectedDate = null;
+  const monthTotal = [...auditDayInfo.values()].reduce((sum, info) => sum + info.totalHours, 0);
+  document.getElementById('auditMonthTotal').textContent = `${monthTotal.toFixed(1)}時間`;
   renderAuditGrid();
   renderAuditDetail();
 }
