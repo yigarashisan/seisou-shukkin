@@ -215,6 +215,7 @@
   <button onclick="changeAuditMonth(1)">翌月 ›</button>
 </div>
 <p class="meta" style="margin-top: 4px;">この清掃場所の1か月合計: <strong id="auditMonthTotal">-</strong></p>
+<div id="auditEmployeeTotals" class="meta" style="margin-top: -4px;"></div>
 <div id="auditGrid"></div>
 <div class="card" id="auditDetail"></div>
 
@@ -739,7 +740,7 @@ async function renderAudit() {
   document.getElementById('auditMonthLabel').textContent = auditMonth.getFullYear() + '年' + (auditMonth.getMonth() + 1) + '月';
   const gridEl = document.getElementById('auditGrid');
   const locationId = document.getElementById('auditLocation').value;
-  if (!locationId) { gridEl.innerHTML = '<p class="empty">清掃場所がありません</p>'; document.getElementById('auditDetail').innerHTML = ''; document.getElementById('auditMonthTotal').textContent = '-'; return; }
+  if (!locationId) { gridEl.innerHTML = '<p class="empty">清掃場所がありません</p>'; document.getElementById('auditDetail').innerHTML = ''; document.getElementById('auditMonthTotal').textContent = '-'; document.getElementById('auditEmployeeTotals').innerHTML = ''; return; }
   const loc = locations.find((l) => l.id === locationId);
 
   const { start, end } = monthRange(auditMonth);
@@ -747,7 +748,7 @@ async function renderAudit() {
     sb.from('attendance_records').select('*, employees(name)').eq('location_id', locationId).gte('date', start).lt('date', end),
     loc?.closed_on_holidays ? getHolidaySet(auditMonth.getFullYear()) : Promise.resolve(new Set()),
   ]);
-  if (error) { gridEl.innerHTML = `<p class="empty">読み込みエラー: ${error.message}</p>`; document.getElementById('auditDetail').innerHTML = ''; document.getElementById('auditMonthTotal').textContent = '-'; return; }
+  if (error) { gridEl.innerHTML = `<p class="empty">読み込みエラー: ${error.message}</p>`; document.getElementById('auditDetail').innerHTML = ''; document.getElementById('auditMonthTotal').textContent = '-'; document.getElementById('auditEmployeeTotals').innerHTML = ''; return; }
 
   const recordsByDate = new Map();
   for (const r of records || []) {
@@ -807,6 +808,22 @@ async function renderAudit() {
   if (auditSelectedDate && !auditDayInfo.has(auditSelectedDate)) auditSelectedDate = null;
   const monthTotal = [...auditDayInfo.values()].reduce((sum, info) => sum + info.totalHours, 0);
   document.getElementById('auditMonthTotal').textContent = `${monthTotal.toFixed(1)}時間`;
+
+  const totalsByEmployee = new Map();
+  for (const r of records || []) {
+    const name = r.employees?.name ?? '?';
+    totalsByEmployee.set(name, (totalsByEmployee.get(name) || 0) + Number(r.hours));
+  }
+  const employeeTotalsEl = document.getElementById('auditEmployeeTotals');
+  if (totalsByEmployee.size === 0) {
+    employeeTotalsEl.innerHTML = '';
+  } else {
+    employeeTotalsEl.innerHTML = '個人別: ' + [...totalsByEmployee.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .map(([name, hours]) => `${name} ${hours.toFixed(1)}時間`)
+      .join('、');
+  }
+
   renderAuditGrid();
   renderAuditDetail();
 }
