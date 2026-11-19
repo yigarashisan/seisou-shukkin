@@ -101,6 +101,22 @@
     border: none; background: none; font-size: 12px; color: var(--brown); cursor: pointer; margin-left: 8px;
   }
   .errorBox { text-align: center; color: var(--muted); padding: 40px 20px; }
+  .calWrap { margin-bottom: 20px; }
+  .calTitle { text-align: center; font-size: 13px; color: var(--muted); margin-bottom: 10px; font-weight: 600; }
+  .calGrid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 5px; }
+  .calHead { margin-bottom: 5px; }
+  .calHeadCell { text-align: center; font-size: 11px; color: var(--muted); }
+  .calCell {
+    aspect-ratio: 1; width: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center;
+    border-radius: 10px; border: none; background: var(--field); font-size: 13px; color: var(--ink);
+    position: relative; padding: 0; font-family: inherit;
+  }
+  .calCell.calEmpty { background: transparent; }
+  .calCell.calDisabled { color: var(--border); background: transparent; }
+  .calCell.calToday:not(.calSelected) { box-shadow: inset 0 0 0 1.5px var(--brown); }
+  .calCell.calSelected { background: var(--brown); color: #fff; }
+  .calCheck { font-size: 9px; line-height: 1; color: var(--coral); margin-top: 2px; }
+  .calCell.calSelected .calCheck { color: #fff; }
 </style>
 </head>
 <body>
@@ -118,6 +134,10 @@ let employee = null;
 let myAssignments = [];
 let selectedAssignment = null;
 let recent = [];
+let periodStart = null;
+let periodEnd = null;
+let periodDates = new Set();
+let selectedDate = null;
 
 const WEEKDAY_LABELS = ['日', '月', '火', '水', '木', '金', '土'];
 
@@ -156,9 +176,84 @@ function recordDetailLabel(r, asg) {
   return `${r.hours}時間(通常と違う: ${r.reason ?? ''})`;
 }
 
-function todayStr() {
-  const d = new Date();
+function dateStr(d) {
   return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+}
+
+function todayStr() {
+  return dateStr(new Date());
+}
+
+function dowOf(ds) {
+  const [y, m, d] = ds.split('-').map(Number);
+  return new Date(y, m - 1, d).getDay();
+}
+
+function dateLabel(ds) {
+  const [, m, d] = ds.split('-').map(Number);
+  return `${m}月${d}日(${WEEKDAY_LABELS[dowOf(ds)]})`;
+}
+
+// 20日締めの給与期間(21日〜翌月20日)。今日がその中のどこにいても
+// 正しい期間を計算できるよう、日付からではなく基準日から算出する
+function payPeriodRange(base) {
+  const y = base.getFullYear(), m = base.getMonth(), d = base.getDate();
+  if (d >= 21) return { start: new Date(y, m, 21), end: new Date(y, m + 1, 20) };
+  return { start: new Date(y, m - 1, 21), end: new Date(y, m, 20) };
+}
+
+function formatPeriodLabel() {
+  return `${periodStart.getMonth() + 1}月${periodStart.getDate()}日 〜 ${periodEnd.getMonth() + 1}月${periodEnd.getDate()}日`;
+}
+
+function buildCalendarDays() {
+  const days = [];
+  for (let i = 0; i < periodStart.getDay(); i++) days.push(null);
+  const cur = new Date(periodStart);
+  while (cur <= periodEnd) {
+    days.push(new Date(cur));
+    cur.setDate(cur.getDate() + 1);
+  }
+  while (days.length % 7 !== 0) days.push(null);
+  return days;
+}
+
+async function loadPeriodDates() {
+  const { data } = await sb
+    .from('attendance_records')
+    .select('date')
+    .eq('employee_id', employee.id)
+    .gte('date', dateStr(periodStart))
+    .lte('date', dateStr(periodEnd));
+  periodDates = new Set((data || []).map((r) => r.date));
+}
+
+function renderCalendarHtml() {
+  const todayS = todayStr();
+  const cells = buildCalendarDays().map((d) => {
+    if (!d) return '<div class="calCell calEmpty"></div>';
+    const ds = dateStr(d);
+    const isFuture = ds > todayS;
+    const cls = ['calCell'];
+    if (isFuture) cls.push('calDisabled');
+    if (ds === todayS) cls.push('calToday');
+    if (ds === selectedDate) cls.push('calSelected');
+    if (isFuture) return `<div class="${cls.join(' ')}"><span class="calNum">${d.getDate()}</span></div>`;
+    const check = periodDates.has(ds) ? '<span class="calCheck">✓</span>' : '';
+    return `<button type="button" class="${cls.join(' ')}" onclick="selectDate('${ds}')"><span class="calNum">${d.getDate()}</span>${check}</button>`;
+  }).join('');
+  return `
+    <div class="calWrap">
+      <div class="calTitle">${formatPeriodLabel()}の記録</div>
+      <div class="calGrid calHead">${WEEKDAY_LABELS.map((w) => `<div class="calHeadCell">${w}</div>`).join('')}</div>
+      <div class="calGrid">${cells}</div>
+    </div>
+  `;
+}
+
+function selectDate(ds) {
+  selectedDate = ds;
+  renderMain();
 }
 
 async function init() {
@@ -190,16 +285,13 @@ async function init() {
     return;
   }
 
-  await loadRecent();
+  const range = payPeriodRange(new Date());
+  periodStart = range.start;
+  periodEnd = range.end;
+  selectedDate = todayStr();
 
-  const todayDow = new Date().getDay();
-  const todays = myAssignments.filter((a) => a.day_of_week === todayDow);
-  if (todays.length === 1) {
-    selectedAssignment = todays[0];
-    renderConfirm();
-  } else {
-    renderChoice(todays.length > 0 ? todays : null);
-  }
+  await Promise.all([loadRecent(), loadPeriodDates()]);
+  renderMain();
 }
 
 async function loadRecent() {
@@ -216,59 +308,93 @@ function renderError(msg) {
   app.innerHTML = `<p class="errorBox">${msg}</p>`;
 }
 
-function renderChoice(list) {
-  const items = list || myAssignments;
-  const showAllLink = !!list && list.length < myAssignments.length;
-  const todayDow = new Date().getDay();
+// 場所・時間が同じ担当は、曜日だけ違っても一覧では1項目にまとめる
+// (代替要員などで同じ場所・時間の担当を複数曜日ぶん登録することがあるため)
+function dedupeAssignments(list) {
+  const seen = new Map();
+  for (const a of list) {
+    const key = `${a.location_id}|${a.start_time}|${a.standard_hours}|${a.break_minutes}`;
+    if (!seen.has(key)) seen.set(key, a);
+  }
+  return [...seen.values()];
+}
+
+function renderMain() {
   app.innerHTML = `
     <h1>${employee.name} さん</h1>
-    <p class="hello">${list ? '本日の清掃場所を選んでください' : '担当場所を選んでください'}</p>
-    <div class="card">
-      ${items.map((a) => `<button class="locChoice" onclick="chooseAssignment('${a.id}')">${a.location_name}(${a.day_of_week === todayDow ? WEEKDAY_LABELS[a.day_of_week] + '曜 ' : ''}${timeRangeLabel(a)})</button>`).join('')}
-    </div>
-    ${showAllLink ? `<button class="linklike" onclick="renderChoice(myAssignments)">すべての担当から選ぶ</button>` : ''}
+    ${renderCalendarHtml()}
+    <div id="daySection"></div>
     ${renderHistoryHtml()}
+  `;
+  renderDayForSelected();
+}
+
+function renderDayForSelected() {
+  const container = document.getElementById('daySection');
+  const dow = dowOf(selectedDate);
+  const matches = myAssignments.filter((a) => a.day_of_week === dow);
+  if (dedupeAssignments(matches).length === 1) {
+    selectedAssignment = matches[0];
+    renderConfirmInto(container);
+  } else {
+    renderChoiceInto(container, matches.length > 0 ? matches : null);
+  }
+}
+
+function renderChoiceInto(container, list) {
+  const items = dedupeAssignments(list || myAssignments);
+  const showAllLink = !!list && list.length < myAssignments.length;
+  const dow = dowOf(selectedDate);
+  const isToday = selectedDate === todayStr();
+  const header = list
+    ? (isToday ? '本日の清掃場所を選んでください' : `${dateLabel(selectedDate)}の清掃場所を選んでください`)
+    : '担当場所を選んでください';
+  container.innerHTML = `
+    <p class="hello">${header}</p>
+    <div class="card">
+      ${items.map((a) => `<button class="locChoice" onclick="chooseAssignment('${a.id}')">${a.location_name}(${a.day_of_week === dow ? WEEKDAY_LABELS[a.day_of_week] + '曜 ' : ''}${timeRangeLabel(a)})</button>`).join('')}
+    </div>
+    ${showAllLink ? `<button class="linklike" onclick="renderChoiceInto(document.getElementById('daySection'), myAssignments)">すべての担当から選ぶ</button>` : ''}
   `;
 }
 
 function chooseAssignment(id) {
   selectedAssignment = myAssignments.find((a) => a.id === id);
-  renderConfirm();
+  renderConfirmInto(document.getElementById('daySection'));
 }
 
-async function checkExistingToday() {
+async function checkExistingForDate(ds, locationId) {
   const { data } = await sb
     .from('attendance_records')
     .select('*')
     .eq('employee_id', employee.id)
-    .eq('location_id', selectedAssignment.location_id)
-    .eq('date', todayStr())
+    .eq('location_id', locationId)
+    .eq('date', ds)
     .maybeSingle();
   return data;
 }
 
-async function renderConfirm() {
-  const existing = await checkExistingToday();
+async function renderConfirmInto(container) {
+  const existing = await checkExistingForDate(selectedDate, selectedAssignment.location_id);
+  const isToday = selectedDate === todayStr();
+  const dateLbl = isToday ? '本日' : dateLabel(selectedDate);
   if (existing) {
-    app.innerHTML = `
-      <h1>${employee.name} さん</h1>
+    container.innerHTML = `
       <div class="card">
         <div class="doneIcon">✅</div>
-        <div class="doneMsg">本日の記録は入力済みです</div>
+        <div class="doneMsg">${dateLbl}の記録は入力済みです</div>
         <div class="doneSub">${selectedAssignment.location_name} / ${recordDetailLabel(existing, selectedAssignment)}</div>
         <button class="linklike" onclick="deleteRecord('${existing.id}')">この記録を取り消す</button>
       </div>
-      ${myAssignments.length > 1 ? `<button class="linklike" onclick="renderChoice(myAssignments)">別の場所を記録する</button>` : ''}
-      ${renderHistoryHtml()}
+      ${myAssignments.length > 1 ? `<button class="linklike" onclick="renderChoiceInto(document.getElementById('daySection'), myAssignments)">別の場所を記録する</button>` : ''}
     `;
     return;
   }
 
-  app.innerHTML = `
-    <h1>${employee.name} さん</h1>
+  container.innerHTML = `
     <div class="card">
       <div class="locName">${selectedAssignment.location_name}</div>
-      <div class="locHours">通常: ${timeRangeLabel(selectedAssignment)}</div>
+      <div class="locHours">${isToday ? '' : dateLbl + ' ・ '}通常: ${timeRangeLabel(selectedAssignment)}</div>
       <button class="bigbtn" onclick="recordStandard()">出勤しました</button>
       <button class="linklike" id="toggleCorrect" onclick="toggleCorrectForm()">時間が違う場合はこちら</button>
       <div id="correctForm" style="display:none;" class="correctForm">
@@ -283,8 +409,7 @@ async function renderConfirm() {
         <button class="bigbtn" onclick="recordCorrected()">この内容で記録する</button>
       </div>
     </div>
-    ${myAssignments.length > 1 ? `<button class="linklike" onclick="renderChoice(myAssignments)">別の場所を記録する</button>` : ''}
-    ${renderHistoryHtml()}
+    ${myAssignments.length > 1 ? `<button class="linklike" onclick="renderChoiceInto(document.getElementById('daySection'), myAssignments)">別の場所を記録する</button>` : ''}
   `;
 }
 
@@ -297,7 +422,7 @@ async function recordStandard() {
   const { error } = await sb.from('attendance_records').insert({
     employee_id: employee.id,
     location_id: selectedAssignment.location_id,
-    date: todayStr(),
+    date: selectedDate,
     hours: selectedAssignment.standard_hours,
     is_standard: true,
   });
@@ -317,7 +442,7 @@ async function recordCorrected() {
   const { error } = await sb.from('attendance_records').insert({
     employee_id: employee.id,
     location_id: selectedAssignment.location_id,
-    date: todayStr(),
+    date: selectedDate,
     hours,
     is_standard: false,
     reason,
@@ -330,15 +455,14 @@ async function recordCorrected() {
 }
 
 async function afterRecord() {
-  await loadRecent();
-  renderConfirm();
+  await Promise.all([loadRecent(), loadPeriodDates()]);
+  renderMain();
 }
 
 async function deleteRecord(id) {
   if (!confirm('この記録を取り消しますか?')) return;
   await sb.from('attendance_records').delete().eq('id', id);
-  await loadRecent();
-  renderConfirm();
+  await afterRecord();
 }
 
 function renderHistoryHtml() {
