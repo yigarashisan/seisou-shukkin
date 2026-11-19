@@ -78,6 +78,22 @@
   .auditOk { color: #5a8a6b; }
   .auditWarn { color: var(--coral); font-weight: 700; }
   tr.auditWarnRow { background: #FBEFE9; }
+  .audCalWrap { margin-bottom: 16px; }
+  .audCalGrid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 5px; }
+  .audCalHead { margin-bottom: 5px; }
+  .audHeadCell { text-align: center; font-size: 11px; color: var(--muted); }
+  .audCell {
+    aspect-ratio: 1; width: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center;
+    border-radius: 10px; border: none; background: var(--field); color: var(--ink); gap: 2px;
+    padding: 2px; font-family: inherit;
+  }
+  .audCell.audEmpty { background: transparent; }
+  .audCell.audOk { background: #E6F2E8; }
+  .audCell.audWarn { background: #FBE3DA; }
+  .audCell.audHoliday { box-shadow: inset 0 0 0 1.5px #D99A6C; }
+  .audCell.audSelected { outline: 2px solid var(--brown); outline-offset: 1px; }
+  .audNum { font-size: 13px; font-weight: 600; }
+  .audHours { font-size: 10px; color: var(--muted); min-height: 12px; }
   .copybtn { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 6px 10px; font-size: 12px; cursor: pointer; }
 </style>
 </head>
@@ -198,14 +214,8 @@
   <strong id="auditMonthLabel"></strong>
   <button onclick="changeAuditMonth(1)">翌月 ›</button>
 </div>
-<div class="card" id="auditCard">
-  <table>
-    <thead>
-      <tr><th>日付</th><th>時間帯</th><th>予定</th><th>実績</th><th>状態</th></tr>
-    </thead>
-    <tbody id="auditBody"></tbody>
-  </table>
-</div>
+<div id="auditGrid"></div>
+<div class="card" id="auditDetail"></div>
 
 </div>
 
@@ -716,13 +726,16 @@ function changeAuditMonth(delta) {
   renderAudit();
 }
 
+let auditDayInfo = new Map();
+let auditSelectedDate = null;
+
 // 清掃場所を1つ選び、その場所の「予定(担当登録)」と「実績(出勤記録)」を日ごとに突き合わせる。
 // 出勤はがきの内容(誰が来るはずで、実際に誰が来たか)をそのまま再現できるようにしている
 async function renderAudit() {
   document.getElementById('auditMonthLabel').textContent = auditMonth.getFullYear() + '年' + (auditMonth.getMonth() + 1) + '月';
-  const tbody = document.getElementById('auditBody');
+  const gridEl = document.getElementById('auditGrid');
   const locationId = document.getElementById('auditLocation').value;
-  if (!locationId) { tbody.innerHTML = '<tr><td colspan="5" class="empty">清掃場所がありません</td></tr>'; return; }
+  if (!locationId) { gridEl.innerHTML = '<p class="empty">清掃場所がありません</p>'; document.getElementById('auditDetail').innerHTML = ''; return; }
   const loc = locations.find((l) => l.id === locationId);
 
   const { start, end } = monthRange(auditMonth);
@@ -730,7 +743,7 @@ async function renderAudit() {
     sb.from('attendance_records').select('*, employees(name)').eq('location_id', locationId).gte('date', start).lt('date', end),
     loc?.closed_on_holidays ? getHolidaySet(auditMonth.getFullYear()) : Promise.resolve(new Set()),
   ]);
-  if (error) { tbody.innerHTML = `<tr><td colspan="5" class="empty">読み込みエラー: ${error.message}</td></tr>`; return; }
+  if (error) { gridEl.innerHTML = `<p class="empty">読み込みエラー: ${error.message}</p>`; document.getElementById('auditDetail').innerHTML = ''; return; }
 
   const recordsByDate = new Map();
   for (const r of records || []) {
@@ -739,7 +752,7 @@ async function renderAudit() {
   }
   const locSchedules = schedules.filter((s) => s.location_id === locationId);
 
-  const rows = [];
+  auditDayInfo = new Map();
   for (let d = new Date(start); d < new Date(end); d.setDate(d.getDate() + 1)) {
     const ds = d.toISOString().slice(0, 10);
     const dow = d.getDay();
@@ -747,7 +760,7 @@ async function renderAudit() {
     const dayRecords = recordsByDate.get(ds) || [];
     const todaysSchedules = (loc?.closed_on_holidays && isHoliday) ? [] : locSchedules.filter((s) => s.day_of_week === dow);
     const consumedIds = new Set();
-    const dateLabel = `${ds.slice(5).replace('-', '/')}(${WEEKDAY_LABELS[dow]})${isHoliday ? ' 祝' : ''}`;
+    const rowsForDay = [];
 
     for (const s of todaysSchedules) {
       const expected = assignments
@@ -756,8 +769,7 @@ async function renderAudit() {
       const actualHere = dayRecords.filter((r) => expected.some((e) => e.id === r.employee_id));
       actualHere.forEach((r) => consumedIds.add(r.employee_id));
       const missing = expected.filter((e) => !actualHere.some((r) => r.employee_id === e.id));
-      rows.push({
-        dateLabel,
+      rowsForDay.push({
         slot: `${s.start_time}〜${computeEndTime(s.start_time, s.standard_hours, s.break_minutes)}`,
         expectedNames: expected.map((e) => e.name),
         actualNames: actualHere.map((r) => r.employees?.name ?? '?'),
@@ -768,8 +780,7 @@ async function renderAudit() {
 
     const leftover = dayRecords.filter((r) => !consumedIds.has(r.employee_id));
     if (leftover.length > 0) {
-      rows.push({
-        dateLabel,
+      rowsForDay.push({
         slot: '(予定外)',
         expectedNames: [],
         actualNames: leftover.map((r) => r.employees?.name ?? '?'),
@@ -777,22 +788,90 @@ async function renderAudit() {
         statusText: `予定外の出勤: ${leftover.map((r) => r.employees?.name ?? '?').join('、')}`,
       });
     }
+
+    const totalHours = dayRecords.reduce((sum, r) => sum + Number(r.hours), 0);
+    auditDayInfo.set(ds, {
+      dow,
+      isHoliday,
+      totalHours,
+      warn: rowsForDay.some((r) => r.warn),
+      hasRecord: dayRecords.length > 0,
+      rows: rowsForDay,
+    });
   }
 
-  if (rows.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="5" class="empty">この月の予定・記録はまだありません</td></tr>';
+  if (auditSelectedDate && !auditDayInfo.has(auditSelectedDate)) auditSelectedDate = null;
+  renderAuditGrid();
+  renderAuditDetail();
+}
+
+function renderAuditGrid() {
+  const gridEl = document.getElementById('auditGrid');
+  const { start, end } = monthRange(auditMonth);
+  const firstDow = new Date(start).getDay();
+  const daysInMonth = Math.round((new Date(end) - new Date(start)) / 86400000);
+  const monthPrefix = start.slice(0, 7);
+  const cells = [];
+  for (let i = 0; i < firstDow; i++) cells.push(null);
+  for (let day = 1; day <= daysInMonth; day++) cells.push(`${monthPrefix}-${String(day).padStart(2, '0')}`);
+  while (cells.length % 7 !== 0) cells.push(null);
+
+  gridEl.innerHTML = `
+    <div class="audCalWrap">
+      <div class="audCalGrid audCalHead">${WEEKDAY_LABELS.map((w) => `<div class="audHeadCell">${w}</div>`).join('')}</div>
+      <div class="audCalGrid">
+        ${cells.map((ds) => {
+          if (!ds) return '<div class="audCell audEmpty"></div>';
+          const info = auditDayInfo.get(ds);
+          const day = Number(ds.slice(8, 10));
+          const cls = ['audCell'];
+          if (info?.warn) cls.push('audWarn');
+          else if (info?.hasRecord) cls.push('audOk');
+          if (info?.isHoliday) cls.push('audHoliday');
+          if (ds === auditSelectedDate) cls.push('audSelected');
+          const hoursLabel = info && info.totalHours > 0 ? `${info.totalHours.toFixed(1)}h` : '';
+          return `<button type="button" class="${cls.join(' ')}" onclick="selectAuditDate('${ds}')">
+            <span class="audNum">${day}</span>
+            <span class="audHours">${hoursLabel}</span>
+          </button>`;
+        }).join('')}
+      </div>
+    </div>
+  `;
+}
+
+function selectAuditDate(ds) {
+  auditSelectedDate = ds;
+  renderAuditGrid();
+  renderAuditDetail();
+}
+
+function renderAuditDetail() {
+  const el = document.getElementById('auditDetail');
+  if (!auditSelectedDate) { el.innerHTML = '<p class="empty">カレンダーの日付をタップすると、その日の予定・実績の内訳が表示されます</p>'; return; }
+  const info = auditDayInfo.get(auditSelectedDate);
+  const day = Number(auditSelectedDate.slice(8, 10));
+  const dateLabel = `${auditMonth.getMonth() + 1}月${day}日(${WEEKDAY_LABELS[info.dow]})${info.isHoliday ? ' 祝' : ''}`;
+  if (!info || info.rows.length === 0) {
+    el.innerHTML = `<p class="empty">${dateLabel}: 予定・記録はありません</p>`;
     return;
   }
-
-  tbody.innerHTML = rows.map((row) => `
-    <tr class="${row.warn ? 'auditWarnRow' : ''}">
-      <td>${row.dateLabel}</td>
-      <td>${row.slot}</td>
-      <td>${row.expectedNames.length ? row.expectedNames.join('、') : '-'}</td>
-      <td>${row.actualNames.length ? row.actualNames.join('、') : '-'}</td>
-      <td class="${row.warn ? 'auditWarn' : 'auditOk'}">${row.statusText}</td>
-    </tr>
-  `).join('');
+  el.innerHTML = `
+    <div class="meta" style="margin-bottom: 8px; font-weight: 600; color: var(--ink); font-size: 14px;">${dateLabel} ・ 合計 ${info.totalHours.toFixed(1)}時間</div>
+    <table>
+      <thead><tr><th>時間帯</th><th>予定</th><th>実績</th><th>状態</th></tr></thead>
+      <tbody>
+        ${info.rows.map((row) => `
+          <tr class="${row.warn ? 'auditWarnRow' : ''}">
+            <td>${row.slot}</td>
+            <td>${row.expectedNames.length ? row.expectedNames.join('、') : '-'}</td>
+            <td>${row.actualNames.length ? row.actualNames.join('、') : '-'}</td>
+            <td class="${row.warn ? 'auditWarn' : 'auditOk'}">${row.statusText}</td>
+          </tr>
+        `).join('')}
+      </tbody>
+    </table>
+  `;
 }
 </script>
 </body>
