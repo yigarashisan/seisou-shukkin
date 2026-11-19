@@ -219,11 +219,12 @@ function renderError(msg) {
 function renderChoice(list) {
   const items = list || myAssignments;
   const showAllLink = !!list && list.length < myAssignments.length;
+  const todayDow = new Date().getDay();
   app.innerHTML = `
     <h1>${employee.name} さん</h1>
     <p class="hello">${list ? '本日の清掃場所を選んでください' : '担当場所を選んでください'}</p>
     <div class="card">
-      ${items.map((a) => `<button class="locChoice" onclick="chooseAssignment('${a.id}')">${a.location_name}(${WEEKDAY_LABELS[a.day_of_week]}曜 ${timeRangeLabel(a)})</button>`).join('')}
+      ${items.map((a) => `<button class="locChoice" onclick="chooseAssignment('${a.id}')">${a.location_name}(${a.day_of_week === todayDow ? WEEKDAY_LABELS[a.day_of_week] + '曜 ' : ''}${timeRangeLabel(a)})</button>`).join('')}
     </div>
     ${showAllLink ? `<button class="linklike" onclick="renderChoice(myAssignments)">すべての担当から選ぶ</button>` : ''}
     ${renderHistoryHtml()}
