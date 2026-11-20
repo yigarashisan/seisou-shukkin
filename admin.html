@@ -424,7 +424,7 @@ function renderEmployees() {
   const el = document.getElementById('employeeList');
   const noteEl = document.getElementById('employeeFilterNote');
   const active = employeeFilter.code || employeeFilter.name;
-  noteEl.innerHTML = active ? `絞り込み中 <a href="#" onclick="clearEmployeeFilter(); return false;">(解除してすべて表示)</a>` : '';
+  noteEl.innerHTML = active ? `絞り込み中 <a href="#" onclick="clearEmployeeFilter(); return false;" style="color: var(--muted); text-decoration: underline;">(解除してすべて表示)</a>` : '';
   if (employees.length === 0) { el.innerHTML = '<p class="empty">まだ従業員が登録されていません</p>'; return; }
   const filtered = employees.filter((e) =>
     (!employeeFilter.code || (e.code || '').toLowerCase().includes(employeeFilter.code)) &&
@@ -468,7 +468,7 @@ function renderLocations() {
   const el = document.getElementById('locationList');
   const noteEl = document.getElementById('locationFilterNote');
   const active = locationFilter.code || locationFilter.name;
-  noteEl.innerHTML = active ? `絞り込み中 <a href="#" onclick="clearLocationFilter(); return false;">(解除してすべて表示)</a>` : '';
+  noteEl.innerHTML = active ? `絞り込み中 <a href="#" onclick="clearLocationFilter(); return false;" style="color: var(--muted); text-decoration: underline;">(解除してすべて表示)</a>` : '';
   if (locations.length === 0) { el.innerHTML = '<p class="empty">まだ清掃場所が登録されていません</p>'; return; }
   const filtered = locations.filter((l) =>
     (!locationFilter.code || (l.code || '').toLowerCase().includes(locationFilter.code)) &&
