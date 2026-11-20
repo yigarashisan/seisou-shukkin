@@ -190,14 +190,15 @@
   <input id="scheduleStartTime" class="field-muted" type="time" style="flex: 0 0 110px;" />
   <input id="scheduleHours" class="field-muted" type="number" step="0.1" placeholder="清掃時間(例: 1.5)" />
   <input id="scheduleBreak" class="field-muted" type="number" step="1" placeholder="休憩(分、任意)" style="flex: 0 0 120px;" />
+  <input id="scheduleRequiredCount" class="field-muted" type="number" step="1" min="1" placeholder="必要人数(例: 1)" style="flex: 0 0 130px;" />
   <button class="btn btn-primary" onclick="searchSchedules()">検索</button>
   <button class="btn btn-secondary" onclick="addSchedule()">追加</button>
 </div>
 <details style="margin-bottom: 16px;">
   <summary style="cursor:pointer; color: var(--brown); font-size: 13px;">まとめて登録(CSV貼り付け)</summary>
   <div class="form-card" style="margin-top: 8px; flex-direction: column; align-items: stretch;">
-    <textarea id="scheduleCsv" rows="6" placeholder="場所コード,曜日,開始時刻,清掃時間,休憩(分)&#10;L012,月,07:30,1.5,0&#10;L012,水,07:30,2.5,30" style="width:100%; font-family: monospace; font-size: 13px;"></textarea>
-    <p class="meta">曜日は 月火水木金土日 の1文字で入力してください。休憩がない場合は 0 と入力してください。場所コードの後ろに場所名の列を入れても自動で無視されます</p>
+    <textarea id="scheduleCsv" rows="6" placeholder="場所コード,曜日,開始時刻,清掃時間,休憩(分),必要人数&#10;L012,月,07:30,1.5,0&#10;L012,水,07:30,2.5,30,2" style="width:100%; font-family: monospace; font-size: 13px;"></textarea>
+    <p class="meta">曜日は 月火水木金土日 の1文字で入力してください。休憩がない場合は 0 と入力してください。必要人数(同時に何人出勤するか)は省略すると1人になります。交代制で複数人を担当登録していても、同時に出勤するのが1人なら必要人数は1のままで構いません。場所コードの後ろに場所名の列を入れても自動で無視されます</p>
     <button class="btn btn-primary" style="margin-top: 8px;" onclick="importSchedulesCsv()">この内容で一括登録</button>
     <div id="scheduleImportResult" class="meta"></div>
   </div>
@@ -254,7 +255,7 @@
   <strong id="auditMonthLabel"></strong>
   <button onclick="changeAuditMonth(1)">翌月 ›</button>
 </div>
-<p class="meta" style="margin-top: 4px;">この清掃場所の1か月合計: <strong id="auditMonthTotal">-</strong></p>
+<p class="meta" style="margin-top: 4px;">実績合計: <strong id="auditMonthTotal">-</strong> ／ 予定合計(スケジュールより): <strong id="auditMonthExpected">-</strong> <span id="auditMonthDiff"></span></p>
 <div id="auditEmployeeTotals" class="meta" style="margin-top: -4px;"></div>
 <div id="auditGrid"></div>
 <div class="card" id="auditDetail"></div>
@@ -523,7 +524,7 @@ function renderSchedules() {
         .sort((a, b) => a.day_of_week - b.day_of_week || a.start_time.localeCompare(b.start_time))
         .map((s, i) => `
           <div class="row" ${i > 0 ? 'style="margin-top:8px; padding-top:8px; border-top:1px solid #F3EFE4;"' : ''}>
-            <div>${WEEKDAY_LABELS[s.day_of_week]}曜 ${s.start_time}〜${computeEndTime(s.start_time, s.standard_hours, s.break_minutes)}(${s.standard_hours}時間${s.break_minutes ? '、休憩' + s.break_minutes + '分' : ''})</div>
+            <div>${WEEKDAY_LABELS[s.day_of_week]}曜 ${s.start_time}〜${computeEndTime(s.start_time, s.standard_hours, s.break_minutes)}(${s.standard_hours}時間${s.break_minutes ? '、休憩' + s.break_minutes + '分' : ''})${(s.required_count || 1) > 1 ? ` <span class="flag" style="font-weight:600;">必要${s.required_count}人</span>` : ''}</div>
             <button class="btn btn-danger btn-small" onclick="deleteSchedule('${s.id}')">削除</button>
           </div>
         `).join('')}
@@ -537,12 +538,14 @@ async function addSchedule() {
   const start_time = document.getElementById('scheduleStartTime').value;
   const standard_hours = parseFloat(document.getElementById('scheduleHours').value);
   const break_minutes = parseInt(document.getElementById('scheduleBreak').value, 10) || 0;
+  const required_count = parseInt(document.getElementById('scheduleRequiredCount').value, 10) || 1;
   if (!location_id || !start_time || !standard_hours) { alert('場所・開始時刻・清掃時間を入力してください'); return; }
-  const { error } = await sb.from('location_schedules').insert({ location_id, day_of_week, start_time, standard_hours, break_minutes });
+  const { error } = await sb.from('location_schedules').insert({ location_id, day_of_week, start_time, standard_hours, break_minutes, required_count });
   if (error) { alert('登録できませんでした: ' + error.message); return; }
   document.getElementById('scheduleStartTime').value = '';
   document.getElementById('scheduleHours').value = '';
   document.getElementById('scheduleBreak').value = '';
+  document.getElementById('scheduleRequiredCount').value = '';
   scheduleFilter = { locationId: '' };
   loadAll();
 }
@@ -560,15 +563,17 @@ async function importSchedulesCsv() {
     const startTime = dayIdx >= 0 ? cols[dayIdx + 1] : undefined;
     const hoursStr = dayIdx >= 0 ? cols[dayIdx + 2] : undefined;
     const breakStr = dayIdx >= 0 ? cols[dayIdx + 3] : undefined;
+    const requiredStr = dayIdx >= 0 ? cols[dayIdx + 4] : undefined;
     const location_id = locByCode.get(locCode);
     const day_of_week = dayStr ? WEEKDAY_LABELS.indexOf(dayStr) : -1;
     const standard_hours = parseFloat(hoursStr);
     const break_minutes = parseInt(breakStr, 10) || 0;
+    const required_count = parseInt(requiredStr, 10) || 1;
     if (!location_id || day_of_week < 0 || !startTime || !standard_hours) {
       errors.push(`${locCode},${dayStr ?? '?'}: 内容を確認してください(場所コード・曜日・時刻・時間)`);
       continue;
     }
-    const { error } = await sb.from('location_schedules').insert({ location_id, day_of_week, start_time: startTime, standard_hours, break_minutes });
+    const { error } = await sb.from('location_schedules').insert({ location_id, day_of_week, start_time: startTime, standard_hours, break_minutes, required_count });
     if (error) { errors.push(`${locCode},${dayStr}: ${error.message}`); continue; }
     added++;
   }
@@ -929,7 +934,7 @@ async function renderAudit() {
   document.getElementById('auditMonthLabel').textContent = `${auditMonth.getFullYear()}年${auditMonth.getMonth() + 1}月分(${startLabel}〜${endLabel})`;
   const gridEl = document.getElementById('auditGrid');
   const locationId = document.getElementById('auditLocation').value;
-  if (!locationId) { gridEl.innerHTML = '<p class="empty">清掃場所がありません</p>'; document.getElementById('auditDetail').innerHTML = ''; document.getElementById('auditMonthTotal').textContent = '-'; document.getElementById('auditEmployeeTotals').innerHTML = ''; return; }
+  if (!locationId) { gridEl.innerHTML = '<p class="empty">清掃場所がありません</p>'; document.getElementById('auditDetail').innerHTML = ''; document.getElementById('auditMonthTotal').textContent = '-'; document.getElementById('auditMonthExpected').textContent = '-'; document.getElementById('auditMonthDiff').textContent = ''; document.getElementById('auditEmployeeTotals').innerHTML = ''; return; }
   const loc = locations.find((l) => l.id === locationId);
 
   const [{ data: records, error }, holidaySetStart, holidaySetEnd] = await Promise.all([
@@ -938,7 +943,7 @@ async function renderAudit() {
     loc?.closed_on_holidays ? getHolidaySet(new Date(end).getFullYear()) : Promise.resolve(new Set()),
   ]);
   const holidaySet = new Set([...holidaySetStart, ...holidaySetEnd]);
-  if (error) { gridEl.innerHTML = `<p class="empty">読み込みエラー: ${error.message}</p>`; document.getElementById('auditDetail').innerHTML = ''; document.getElementById('auditMonthTotal').textContent = '-'; document.getElementById('auditEmployeeTotals').innerHTML = ''; return; }
+  if (error) { gridEl.innerHTML = `<p class="empty">読み込みエラー: ${error.message}</p>`; document.getElementById('auditDetail').innerHTML = ''; document.getElementById('auditMonthTotal').textContent = '-'; document.getElementById('auditMonthExpected').textContent = '-'; document.getElementById('auditMonthDiff').textContent = ''; document.getElementById('auditEmployeeTotals').innerHTML = ''; return; }
 
   const recordsByDate = new Map();
   for (const r of records || []) {
@@ -948,6 +953,7 @@ async function renderAudit() {
   const locSchedules = schedules.filter((s) => s.location_id === locationId);
 
   auditDayInfo = new Map();
+  let expectedTotal = 0;
   for (let d = new Date(start); d <= new Date(end); d.setDate(d.getDate() + 1)) {
     const ds = d.toISOString().slice(0, 10);
     const dow = d.getDay();
@@ -963,13 +969,17 @@ async function renderAudit() {
         .map((a) => ({ id: a.employee_id, name: a.employees?.name ?? '?' }));
       const actualHere = dayRecords.filter((r) => expected.some((e) => e.id === r.employee_id));
       actualHere.forEach((r) => consumedIds.add(r.employee_id));
-      const missing = expected.filter((e) => !actualHere.some((r) => r.employee_id === e.id));
+      const requiredCount = s.required_count || 1;
+      expectedTotal += Number(s.standard_hours) * requiredCount;
+      // 交代制(複数人を担当登録しているが、同時に出勤するのは必要人数分だけ)でも
+      // 正しく判定できるよう、個人名ではなく必要人数に対する実際の出勤人数で判定する
+      const shortBy = expected.length === 0 ? 0 : Math.max(0, requiredCount - actualHere.length);
       rowsForDay.push({
-        slot: `${s.start_time}〜${computeEndTime(s.start_time, s.standard_hours, s.break_minutes)}`,
+        slot: `${s.start_time}〜${computeEndTime(s.start_time, s.standard_hours, s.break_minutes)}${requiredCount > 1 ? `(必要${requiredCount}人)` : ''}`,
         expectedNames: expected.map((e) => e.name),
         actualNames: actualHere.map((r) => r.employees?.name ?? '?'),
-        warn: missing.length > 0,
-        statusText: missing.length > 0 ? `記録漏れ: ${missing.map((e) => e.name).join('、')}` : (expected.length ? '✓' : '-'),
+        warn: shortBy > 0,
+        statusText: expected.length === 0 ? '-' : (shortBy > 0 ? `記録漏れ: 必要${requiredCount}人のところ${actualHere.length}人` : '✓'),
       });
     }
 
@@ -998,6 +1008,16 @@ async function renderAudit() {
   if (auditSelectedDate && !auditDayInfo.has(auditSelectedDate)) auditSelectedDate = null;
   const monthTotal = [...auditDayInfo.values()].reduce((sum, info) => sum + info.totalHours, 0);
   document.getElementById('auditMonthTotal').textContent = `${monthTotal.toFixed(1)}時間`;
+  document.getElementById('auditMonthExpected').textContent = `${expectedTotal.toFixed(1)}時間`;
+  const diff = monthTotal - expectedTotal;
+  const diffEl = document.getElementById('auditMonthDiff');
+  if (Math.abs(diff) < 0.05) {
+    diffEl.textContent = '(差なし)';
+    diffEl.style.color = 'var(--muted)';
+  } else {
+    diffEl.textContent = `(差 ${diff > 0 ? '+' : ''}${diff.toFixed(1)}時間)`;
+    diffEl.style.color = 'var(--coral)';
+  }
 
   const totalsByEmployee = new Map();
   for (const r of records || []) {
