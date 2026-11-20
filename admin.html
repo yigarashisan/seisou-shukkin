@@ -521,6 +521,32 @@ function clearScheduleFilter() {
   renderSchedules();
 }
 
+const SCHEDULE_DAY_OPTIONS = [1, 2, 3, 4, 5, 6, 0];
+let editingScheduleId = null;
+
+function editSchedule(id) {
+  editingScheduleId = id;
+  renderSchedules();
+}
+
+function cancelScheduleEdit() {
+  editingScheduleId = null;
+  renderSchedules();
+}
+
+async function saveScheduleEdit(id) {
+  const day_of_week = parseInt(document.getElementById(`editDay_${id}`).value, 10);
+  const start_time = document.getElementById(`editStart_${id}`).value;
+  const standard_hours = parseFloat(document.getElementById(`editHours_${id}`).value);
+  const break_minutes = parseInt(document.getElementById(`editBreak_${id}`).value, 10) || 0;
+  const required_count = parseInt(document.getElementById(`editRequired_${id}`).value, 10) || 1;
+  if (!start_time || !standard_hours) { alert('開始時刻・清掃時間を入力してください'); return; }
+  const { error } = await sb.from('location_schedules').update({ day_of_week, start_time, standard_hours, break_minutes, required_count }).eq('id', id);
+  if (error) { alert('更新できませんでした: ' + error.message); return; }
+  editingScheduleId = null;
+  loadAll();
+}
+
 function renderSchedules() {
   const el = document.getElementById('scheduleList');
   const noteEl = document.getElementById('scheduleFilterNote');
@@ -533,12 +559,35 @@ function renderSchedules() {
       <div class="name" style="margin-bottom: 8px;">${loc.name}${loc.code ? ' <span style="color:var(--muted); font-weight:400;">(コード: ' + loc.code + ')</span>' : ''}</div>
       ${loc.items
         .sort((a, b) => a.day_of_week - b.day_of_week || a.start_time.localeCompare(b.start_time))
-        .map((s, i) => `
-          <div class="row" ${i > 0 ? 'style="margin-top:8px; padding-top:8px; border-top:1px solid #F3EFE4;"' : ''}>
+        .map((s, i) => {
+          const rowStyle = i > 0 ? 'style="margin-top:8px; padding-top:8px; border-top:1px solid #F3EFE4;"' : '';
+          if (s.id === editingScheduleId) {
+            return `
+              <div class="row" ${rowStyle}>
+                <div class="form-card" style="margin:0; flex:1;">
+                  <select id="editDay_${s.id}" style="flex: 0 0 80px;">
+                    ${SCHEDULE_DAY_OPTIONS.map((v) => `<option value="${v}" ${v === s.day_of_week ? 'selected' : ''}>${WEEKDAY_LABELS[v]}</option>`).join('')}
+                  </select>
+                  <input id="editStart_${s.id}" type="time" value="${s.start_time}" style="flex: 0 0 110px;" />
+                  <input id="editHours_${s.id}" type="number" step="0.1" value="${s.standard_hours}" placeholder="清掃時間" />
+                  <input id="editBreak_${s.id}" type="number" step="1" value="${s.break_minutes || 0}" placeholder="休憩(分)" style="flex: 0 0 110px;" />
+                  <input id="editRequired_${s.id}" type="number" step="1" min="1" value="${s.required_count || 1}" placeholder="必要人数" style="flex: 0 0 110px;" />
+                  <button class="btn btn-primary btn-small" onclick="saveScheduleEdit('${s.id}')">保存</button>
+                  <button class="copybtn" onclick="cancelScheduleEdit()">キャンセル</button>
+                </div>
+              </div>
+            `;
+          }
+          return `
+          <div class="row" ${rowStyle}>
             <div>${WEEKDAY_LABELS[s.day_of_week]}曜 ${s.start_time}〜${computeEndTime(s.start_time, s.standard_hours, s.break_minutes)}(${s.standard_hours}時間${s.break_minutes ? '、休憩' + s.break_minutes + '分' : ''})${(s.required_count || 1) > 1 ? ` <span class="flag" style="font-weight:600;">必要${s.required_count}人</span>` : ''}</div>
-            <button class="btn btn-danger btn-small" onclick="deleteSchedule('${s.id}')">削除</button>
+            <div style="display:flex; gap:6px;">
+              <button class="copybtn" onclick="editSchedule('${s.id}')">編集</button>
+              <button class="btn btn-danger btn-small" onclick="deleteSchedule('${s.id}')">削除</button>
+            </div>
           </div>
-        `).join('')}
+        `;
+        }).join('')}
     </div>
   `).join('');
 }
