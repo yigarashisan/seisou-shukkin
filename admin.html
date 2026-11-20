@@ -89,11 +89,11 @@
   .audHeadCell.audSun { color: var(--dusty-red); }
   .audHeadCell.audSat { color: var(--dusty-blue); }
   .audCell {
-    aspect-ratio: 1; width: 100%; display: flex; flex-direction: column; align-items: center; justify-content: flex-start;
+    min-height: 60px; width: 100%; display: flex; flex-direction: column; align-items: center; justify-content: flex-start;
     border-radius: 10px; border: none; background: var(--field); color: var(--ink); gap: 2px;
-    padding: 4px 2px 2px; font-family: inherit;
+    padding: 4px 2px 5px; font-family: inherit;
   }
-  .audCell.audEmpty { background: transparent; }
+  .audCell.audEmpty { background: transparent; min-height: 0; }
   .audCell.audOk { background: #E6F2E8; }
   .audCell.audWarn { background: #FBE3DA; }
   .audCell.audHoliday { box-shadow: inset 0 0 0 1.5px #D99A6C; }
@@ -970,16 +970,22 @@ async function renderAudit() {
     const dow = d.getDay();
     const isHoliday = holidaySet.has(ds);
     const dayRecords = recordsByDate.get(ds) || [];
-    const todaysSchedules = (loc?.closed_on_holidays && isHoliday) ? [] : locSchedules.filter((s) => s.day_of_week === dow);
+    const todaysSchedules = ((loc?.closed_on_holidays && isHoliday) ? [] : locSchedules.filter((s) => s.day_of_week === dow))
+      .sort((a, b) => a.start_time.localeCompare(b.start_time));
     const consumedIds = new Set();
     const rowsForDay = [];
+    const hoursByEmployee = new Map();
 
     for (const s of todaysSchedules) {
       const expected = assignments
         .filter((a) => a.schedule_id === s.id)
         .map((a) => ({ id: a.employee_id, name: a.employees?.name ?? '?' }));
       const actualHere = dayRecords.filter((r) => expected.some((e) => e.id === r.employee_id));
-      actualHere.forEach((r) => consumedIds.add(r.employee_id));
+      actualHere.forEach((r) => {
+        consumedIds.add(r.employee_id);
+        const name = r.employees?.name ?? '?';
+        hoursByEmployee.set(name, (hoursByEmployee.get(name) || 0) + Number(r.hours));
+      });
       const requiredCount = s.required_count || 1;
       expectedTotal += Number(s.standard_hours) * requiredCount;
       // 交代制(複数人を担当登録しているが、同時に出勤するのは必要人数分だけ)でも
@@ -1003,14 +1009,13 @@ async function renderAudit() {
         warn: true,
         statusText: `予定外の出勤: ${leftover.map((r) => r.employees?.name ?? '?').join('、')}`,
       });
+      for (const r of leftover) {
+        const name = r.employees?.name ?? '?';
+        hoursByEmployee.set(name, (hoursByEmployee.get(name) || 0) + Number(r.hours));
+      }
     }
 
     const totalHours = dayRecords.reduce((sum, r) => sum + Number(r.hours), 0);
-    const hoursByEmployee = new Map();
-    for (const r of dayRecords) {
-      const name = r.employees?.name ?? '?';
-      hoursByEmployee.set(name, (hoursByEmployee.get(name) || 0) + Number(r.hours));
-    }
     auditDayInfo.set(ds, {
       dow,
       isHoliday,
@@ -1084,7 +1089,7 @@ function renderAuditGrid() {
           let bottomHtml;
           if (people.length === 0) {
             bottomHtml = '<span class="audHours"></span>';
-          } else if (people.length <= 2) {
+          } else if (people.length <= 3) {
             bottomHtml = `<span class="audNames">${people.map((p) => `${surnameOf(p.name)} ${p.hours.toFixed(1)}h`).join('<br>')}</span>`;
           } else {
             bottomHtml = `<span class="audHours">${info.totalHours.toFixed(1)}h(${people.length}人)</span>`;
