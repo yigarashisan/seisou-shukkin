@@ -48,6 +48,7 @@
   }
   .btn-primary { background: var(--brown); color: #fff; }
   .btn-secondary { background: var(--surface); color: var(--brown); border: 1px solid var(--border); }
+  .field-muted { color: var(--muted); }
   .btn-danger { background: transparent; color: var(--coral); }
   .btn-small { padding: 6px 10px; font-size: 12px; }
   .form-card {
@@ -136,7 +137,7 @@
 <div class="form-card">
   <input id="newEmployeeCode" placeholder="コード番号(ファイルメーカー)" style="flex: 0 0 160px;" />
   <input id="newEmployeeName" placeholder="氏名(例: 山田 太郎)" style="flex: 0 0 200px;" />
-  <button class="btn btn-primary" onclick="searchEmployees()">🔍 検索</button>
+  <button class="btn btn-primary" onclick="searchEmployees()">検索</button>
   <button class="btn btn-secondary" onclick="addEmployee()">追加</button>
 </div>
 <details style="margin-bottom: 16px;">
@@ -156,7 +157,7 @@
 <div class="form-card">
   <input id="newLocationCode" placeholder="コード番号(ファイルメーカー)" style="flex: 0 0 160px;" />
   <input id="newLocationName" placeholder="場所名(例: 〇〇ビル)" style="flex: 0 0 200px;" />
-  <button class="btn btn-primary" onclick="searchLocations()">🔍 検索</button>
+  <button class="btn btn-primary" onclick="searchLocations()">検索</button>
   <button class="btn btn-secondary" onclick="addLocation()">追加</button>
 </div>
 <p class="meta" style="margin-top: -8px;">祝日の扱いは登録後、一覧の「祝日は休みにする」から設定できます</p>
@@ -177,7 +178,7 @@
 <h2>清掃場所のスケジュール(曜日ごとの時間)</h2>
 <div class="form-card">
   <select id="scheduleLocation"></select>
-  <select id="scheduleDay" style="flex: 0 0 80px;">
+  <select id="scheduleDay" class="field-muted" style="flex: 0 0 80px;">
     <option value="1">月</option>
     <option value="2">火</option>
     <option value="3">水</option>
@@ -186,10 +187,10 @@
     <option value="6">土</option>
     <option value="0">日</option>
   </select>
-  <input id="scheduleStartTime" type="time" style="flex: 0 0 110px;" />
-  <input id="scheduleHours" type="number" step="0.1" placeholder="清掃時間(例: 1.5)" />
-  <input id="scheduleBreak" type="number" step="1" placeholder="休憩(分、任意)" style="flex: 0 0 120px;" />
-  <button class="btn btn-primary" onclick="searchSchedules()">🔍 検索</button>
+  <input id="scheduleStartTime" class="field-muted" type="time" style="flex: 0 0 110px;" />
+  <input id="scheduleHours" class="field-muted" type="number" step="0.1" placeholder="清掃時間(例: 1.5)" />
+  <input id="scheduleBreak" class="field-muted" type="number" step="1" placeholder="休憩(分、任意)" style="flex: 0 0 120px;" />
+  <button class="btn btn-primary" onclick="searchSchedules()">検索</button>
   <button class="btn btn-secondary" onclick="addSchedule()">追加</button>
 </div>
 <details style="margin-bottom: 16px;">
@@ -210,8 +211,8 @@
 <div class="form-card">
   <select id="assignEmployee"></select>
   <select id="assignScheduleLocation" onchange="updateAssignScheduleOptions()"></select>
-  <select id="assignSchedule"></select>
-  <button class="btn btn-primary" onclick="searchAssignments()">🔍 検索</button>
+  <select id="assignSchedule" class="field-muted"></select>
+  <button class="btn btn-primary" onclick="searchAssignments()">検索</button>
   <button class="btn btn-secondary" onclick="addAssignment()">追加</button>
 </div>
 <details style="margin-bottom: 16px;">
@@ -640,12 +641,15 @@ function renderAssignments() {
   if (sorted.length === 0) { el.innerHTML = '<p class="empty">該当する担当が見つかりません</p>'; return; }
   el.innerHTML = '<div class="card">' + sorted.map((a) => {
     const s = a.location_schedules;
-    const label = s
-      ? `${s.locations?.name ?? '?'}(${WEEKDAY_LABELS[s.day_of_week]}曜 ${s.start_time}〜${computeEndTime(s.start_time, s.standard_hours, s.break_minutes)})`
+    const timeLabel = s
+      ? `${WEEKDAY_LABELS[s.day_of_week]}曜 ${s.start_time}〜${computeEndTime(s.start_time, s.standard_hours, s.break_minutes)}`
       : '(スケジュール不明)';
     return `
     <div class="row">
-      <div class="name">${a.employees?.name ?? '?'} × ${label}</div>
+      <div>
+        <div class="name">${a.employees?.name ?? '?'} × ${s?.locations?.name ?? '?'}</div>
+        <div class="meta">${timeLabel}</div>
+      </div>
       <button class="btn btn-danger btn-small" onclick="deleteAssignment('${a.id}')">削除</button>
     </div>
   `;
