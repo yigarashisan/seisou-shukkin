@@ -137,6 +137,7 @@
   <input id="newEmployeeCode" placeholder="コード番号(ファイルメーカー)" style="flex: 0 0 160px;" />
   <input id="newEmployeeName" placeholder="氏名(例: 山田 太郎)" />
   <button class="btn btn-primary" onclick="addEmployee()">追加</button>
+  <button class="copybtn" onclick="searchEmployees()">🔍 検索</button>
 </div>
 <details style="margin-bottom: 16px;">
   <summary style="cursor:pointer; color: var(--brown); font-size: 13px;">まとめて登録(CSV貼り付け)</summary>
@@ -146,7 +147,7 @@
     <div id="employeeImportResult" class="meta"></div>
   </div>
 </details>
-<input id="employeeSearch" class="search-box" type="text" placeholder="🔍 名前・コードで検索" oninput="renderEmployees()" />
+<div id="employeeFilterNote" class="meta"></div>
 <div id="employeeList"></div>
 </div>
 
@@ -157,6 +158,7 @@
   <input id="newLocationName" placeholder="場所名(例: 〇〇ビル)" />
   <label style="display:flex; align-items:center; gap:4px; font-size:13px; color: var(--muted); flex: 0 0 auto;"><input type="checkbox" id="newLocationHoliday" /> 祝日は休み</label>
   <button class="btn btn-primary" onclick="addLocation()">追加</button>
+  <button class="copybtn" onclick="searchLocations()">🔍 検索</button>
 </div>
 <details style="margin-bottom: 16px;">
   <summary style="cursor:pointer; color: var(--brown); font-size: 13px;">まとめて登録(CSV貼り付け)</summary>
@@ -167,7 +169,7 @@
     <div id="locationImportResult" class="meta"></div>
   </div>
 </details>
-<input id="locationSearch" class="search-box" type="text" placeholder="🔍 名前・コードで検索" oninput="renderLocations()" />
+<div id="locationFilterNote" class="meta"></div>
 <div id="locationList"></div>
 </div>
 
@@ -400,11 +402,33 @@ async function loadAll() {
   renderAudit();
 }
 
+let employeeFilter = { code: '', name: '' };
+
+function searchEmployees() {
+  employeeFilter = {
+    code: document.getElementById('newEmployeeCode').value.trim().toLowerCase(),
+    name: document.getElementById('newEmployeeName').value.trim().toLowerCase(),
+  };
+  renderEmployees();
+}
+
+function clearEmployeeFilter() {
+  employeeFilter = { code: '', name: '' };
+  document.getElementById('newEmployeeCode').value = '';
+  document.getElementById('newEmployeeName').value = '';
+  renderEmployees();
+}
+
 function renderEmployees() {
   const el = document.getElementById('employeeList');
+  const noteEl = document.getElementById('employeeFilterNote');
+  const active = employeeFilter.code || employeeFilter.name;
+  noteEl.innerHTML = active ? `絞り込み中 <a href="#" onclick="clearEmployeeFilter(); return false;">(解除してすべて表示)</a>` : '';
   if (employees.length === 0) { el.innerHTML = '<p class="empty">まだ従業員が登録されていません</p>'; return; }
-  const query = searchValue('employeeSearch');
-  const filtered = employees.filter((e) => textMatches(query, e.name, e.code));
+  const filtered = employees.filter((e) =>
+    (!employeeFilter.code || (e.code || '').toLowerCase().includes(employeeFilter.code)) &&
+    (!employeeFilter.name || (e.name || '').toLowerCase().includes(employeeFilter.name))
+  );
   if (filtered.length === 0) { el.innerHTML = '<p class="empty">該当する従業員が見つかりません</p>'; return; }
   const sorted = filtered.sort(byCode);
   el.innerHTML = '<div class="card">' + sorted.map((emp, i) => `
@@ -422,11 +446,33 @@ function renderEmployees() {
   `).join('') + '</div>';
 }
 
+let locationFilter = { code: '', name: '' };
+
+function searchLocations() {
+  locationFilter = {
+    code: document.getElementById('newLocationCode').value.trim().toLowerCase(),
+    name: document.getElementById('newLocationName').value.trim().toLowerCase(),
+  };
+  renderLocations();
+}
+
+function clearLocationFilter() {
+  locationFilter = { code: '', name: '' };
+  document.getElementById('newLocationCode').value = '';
+  document.getElementById('newLocationName').value = '';
+  renderLocations();
+}
+
 function renderLocations() {
   const el = document.getElementById('locationList');
+  const noteEl = document.getElementById('locationFilterNote');
+  const active = locationFilter.code || locationFilter.name;
+  noteEl.innerHTML = active ? `絞り込み中 <a href="#" onclick="clearLocationFilter(); return false;">(解除してすべて表示)</a>` : '';
   if (locations.length === 0) { el.innerHTML = '<p class="empty">まだ清掃場所が登録されていません</p>'; return; }
-  const query = searchValue('locationSearch');
-  const filtered = locations.filter((l) => textMatches(query, l.name, l.code));
+  const filtered = locations.filter((l) =>
+    (!locationFilter.code || (l.code || '').toLowerCase().includes(locationFilter.code)) &&
+    (!locationFilter.name || (l.name || '').toLowerCase().includes(locationFilter.name))
+  );
   if (filtered.length === 0) { el.innerHTML = '<p class="empty">該当する清掃場所が見つかりません</p>'; return; }
   const sorted = filtered.sort(byCode);
   el.innerHTML = '<div class="card">' + sorted.map((loc) => `
@@ -580,6 +626,7 @@ async function addEmployee() {
   if (error) { alert('登録できませんでした: ' + error.message); return; }
   document.getElementById('newEmployeeName').value = '';
   document.getElementById('newEmployeeCode').value = '';
+  employeeFilter = { code: '', name: '' };
   loadAll();
 }
 
@@ -598,6 +645,7 @@ async function importEmployeesCsv() {
   }
   document.getElementById('employeeImportResult').innerHTML = `${added}件登録、${skipped}件スキップ(既存コード)` + (errors.length ? `<br>失敗: ${errors.length}件<br>${errors.join('<br>')}` : '');
   document.getElementById('employeeCsv').value = '';
+  employeeFilter = { code: '', name: '' };
   loadAll();
 }
 
@@ -624,6 +672,7 @@ async function addLocation() {
   document.getElementById('newLocationName').value = '';
   document.getElementById('newLocationCode').value = '';
   document.getElementById('newLocationHoliday').checked = false;
+  locationFilter = { code: '', name: '' };
   loadAll();
 }
 
@@ -643,6 +692,7 @@ async function importLocationsCsv() {
   }
   document.getElementById('locationImportResult').innerHTML = `${added}件登録、${skipped}件スキップ(既存コード)` + (errors.length ? `<br>失敗: ${errors.length}件<br>${errors.join('<br>')}` : '');
   document.getElementById('locationCsv').value = '';
+  locationFilter = { code: '', name: '' };
   loadAll();
 }
 
