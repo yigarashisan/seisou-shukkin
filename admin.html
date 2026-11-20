@@ -101,6 +101,9 @@
   .audNum.audNumSun { color: var(--dusty-red); }
   .audNum.audNumSat { color: var(--dusty-blue); }
   .audNames { font-size: 9px; color: var(--ink); line-height: 1.2; text-align: center; word-break: break-all; }
+  .field-wrap { display: flex; flex-direction: column; gap: 2px; }
+  .field-wrap label { font-size: 10px; color: var(--muted); }
+  .field-wrap input, .field-wrap select { min-width: 0; width: 100%; }
   .audNum { font-size: 13px; font-weight: 600; }
   .audHours { font-size: 10px; color: var(--muted); min-height: 12px; }
   .copybtn { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 6px 10px; font-size: 12px; cursor: pointer; }
@@ -185,7 +188,7 @@
 <h2>清掃場所のスケジュール(曜日ごとの時間)</h2>
 <div class="form-card">
   <select id="scheduleLocation"></select>
-  <select id="scheduleDay" class="field-muted" style="flex: 0 0 80px;">
+  <select id="scheduleDay" class="field-muted" style="flex: 0 0 80px; min-width: 0;">
     <option value="1">月</option>
     <option value="2">火</option>
     <option value="3">水</option>
@@ -195,9 +198,9 @@
     <option value="0">日</option>
   </select>
   <input id="scheduleStartTime" class="field-muted" type="time" style="flex: 0 0 110px;" />
-  <input id="scheduleHours" class="field-muted" type="number" step="0.1" placeholder="清掃時間(例: 1.5)" />
-  <input id="scheduleBreak" class="field-muted" type="number" step="1" placeholder="休憩(分、任意)" style="flex: 0 0 120px;" />
-  <input id="scheduleRequiredCount" class="field-muted" type="number" step="1" min="1" placeholder="必要人数(例: 1)" style="flex: 0 0 130px;" />
+  <input id="scheduleHours" class="field-muted" type="number" step="0.1" placeholder="清掃時間(例:1.5)" style="flex: 0 0 110px; font-size: 11px;" />
+  <input id="scheduleBreak" class="field-muted" type="number" step="1" placeholder="休憩(分,任意)" style="flex: 0 0 110px; font-size: 11px;" />
+  <input id="scheduleRequiredCount" class="field-muted" type="number" step="1" min="1" placeholder="人数" style="flex: 0 0 70px; min-width: 0;" />
   <button class="btn btn-primary" onclick="searchSchedules()">検索</button>
   <button class="btn btn-secondary" onclick="addSchedule()">追加</button>
 </div>
@@ -564,14 +567,29 @@ function renderSchedules() {
           if (s.id === editingScheduleId) {
             return `
               <div class="row" ${rowStyle}>
-                <div class="form-card" style="margin:0; flex:1;">
-                  <select id="editDay_${s.id}" style="flex: 0 0 80px;">
-                    ${SCHEDULE_DAY_OPTIONS.map((v) => `<option value="${v}" ${v === s.day_of_week ? 'selected' : ''}>${WEEKDAY_LABELS[v]}</option>`).join('')}
-                  </select>
-                  <input id="editStart_${s.id}" type="time" value="${s.start_time}" style="flex: 0 0 110px;" />
-                  <input id="editHours_${s.id}" type="number" step="0.1" value="${s.standard_hours}" placeholder="清掃時間" />
-                  <input id="editBreak_${s.id}" type="number" step="1" value="${s.break_minutes || 0}" placeholder="休憩(分)" style="flex: 0 0 110px;" />
-                  <input id="editRequired_${s.id}" type="number" step="1" min="1" value="${s.required_count || 1}" placeholder="必要人数" style="flex: 0 0 110px;" />
+                <div class="form-card" style="margin:0; flex:1; align-items:flex-end;">
+                  <div class="field-wrap" style="flex: 0 0 80px;">
+                    <label>曜日</label>
+                    <select id="editDay_${s.id}">
+                      ${SCHEDULE_DAY_OPTIONS.map((v) => `<option value="${v}" ${v === s.day_of_week ? 'selected' : ''}>${WEEKDAY_LABELS[v]}</option>`).join('')}
+                    </select>
+                  </div>
+                  <div class="field-wrap" style="flex: 0 0 110px;">
+                    <label>開始時刻</label>
+                    <input id="editStart_${s.id}" type="time" value="${s.start_time}" />
+                  </div>
+                  <div class="field-wrap" style="flex: 0 0 90px;">
+                    <label>清掃時間</label>
+                    <input id="editHours_${s.id}" type="number" step="0.1" value="${s.standard_hours}" />
+                  </div>
+                  <div class="field-wrap" style="flex: 0 0 90px;">
+                    <label>休憩(分)</label>
+                    <input id="editBreak_${s.id}" type="number" step="1" value="${s.break_minutes || 0}" />
+                  </div>
+                  <div class="field-wrap" style="flex: 0 0 70px;">
+                    <label>必要人数</label>
+                    <input id="editRequired_${s.id}" type="number" step="1" min="1" value="${s.required_count || 1}" />
+                  </div>
                   <button class="btn btn-primary btn-small" onclick="saveScheduleEdit('${s.id}')">保存</button>
                   <button class="copybtn" onclick="cancelScheduleEdit()">キャンセル</button>
                 </div>
