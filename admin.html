@@ -15,6 +15,8 @@
     --muted: #6B7A8D;
     --brown: #7c5d48;
     --coral: #F7877C;
+    --dusty-blue: #6C8CAE;
+    --dusty-red: #B5726B;
   }
   * { box-sizing: border-box; }
   body {
@@ -84,16 +86,21 @@
   .audCalGrid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 5px; }
   .audCalHead { margin-bottom: 5px; }
   .audHeadCell { text-align: center; font-size: 11px; color: var(--muted); }
+  .audHeadCell.audSun { color: var(--dusty-red); }
+  .audHeadCell.audSat { color: var(--dusty-blue); }
   .audCell {
-    aspect-ratio: 1; width: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center;
+    aspect-ratio: 1; width: 100%; display: flex; flex-direction: column; align-items: center; justify-content: flex-start;
     border-radius: 10px; border: none; background: var(--field); color: var(--ink); gap: 2px;
-    padding: 2px; font-family: inherit;
+    padding: 4px 2px 2px; font-family: inherit;
   }
   .audCell.audEmpty { background: transparent; }
   .audCell.audOk { background: #E6F2E8; }
   .audCell.audWarn { background: #FBE3DA; }
   .audCell.audHoliday { box-shadow: inset 0 0 0 1.5px #D99A6C; }
   .audCell.audSelected { outline: 2px solid var(--brown); outline-offset: 1px; }
+  .audNum.audNumSun { color: var(--dusty-red); }
+  .audNum.audNumSat { color: var(--dusty-blue); }
+  .audNames { font-size: 9px; color: var(--ink); line-height: 1.2; text-align: center; word-break: break-all; }
   .audNum { font-size: 13px; font-weight: 600; }
   .audHours { font-size: 10px; color: var(--muted); min-height: 12px; }
   .copybtn { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 6px 10px; font-size: 12px; cursor: pointer; }
@@ -370,6 +377,10 @@ function personalLink(slug) {
 // numeric: true で数字部分を数として比較する)
 function byCode(a, b) {
   return (a.code || '').localeCompare(b.code || '', undefined, { numeric: true, sensitivity: 'base' });
+}
+
+function surnameOf(name) {
+  return (name || '').split(/[\s　]+/)[0] || name;
 }
 
 
@@ -995,6 +1006,11 @@ async function renderAudit() {
     }
 
     const totalHours = dayRecords.reduce((sum, r) => sum + Number(r.hours), 0);
+    const hoursByEmployee = new Map();
+    for (const r of dayRecords) {
+      const name = r.employees?.name ?? '?';
+      hoursByEmployee.set(name, (hoursByEmployee.get(name) || 0) + Number(r.hours));
+    }
     auditDayInfo.set(ds, {
       dow,
       isHoliday,
@@ -1002,6 +1018,7 @@ async function renderAudit() {
       warn: rowsForDay.some((r) => r.warn),
       hasRecord: dayRecords.length > 0,
       rows: rowsForDay,
+      employeeHours: [...hoursByEmployee.entries()].map(([name, hours]) => ({ name, hours })),
     });
   }
 
@@ -1049,7 +1066,7 @@ function renderAuditGrid() {
 
   gridEl.innerHTML = `
     <div class="audCalWrap">
-      <div class="audCalGrid audCalHead">${WEEKDAY_LABELS.map((w) => `<div class="audHeadCell">${w}</div>`).join('')}</div>
+      <div class="audCalGrid audCalHead">${WEEKDAY_LABELS.map((w, i) => `<div class="audHeadCell ${i === 0 ? 'audSun' : i === 6 ? 'audSat' : ''}">${w}</div>`).join('')}</div>
       <div class="audCalGrid">
         ${cells.map((ds) => {
           if (!ds) return '<div class="audCell audEmpty"></div>';
@@ -1060,10 +1077,21 @@ function renderAuditGrid() {
           else if (info?.hasRecord) cls.push('audOk');
           if (info?.isHoliday) cls.push('audHoliday');
           if (ds === auditSelectedDate) cls.push('audSelected');
-          const hoursLabel = info && info.totalHours > 0 ? `${info.totalHours.toFixed(1)}h` : '';
+          const numCls = ['audNum'];
+          if (info?.isHoliday || info?.dow === 0) numCls.push('audNumSun');
+          else if (info?.dow === 6) numCls.push('audNumSat');
+          const people = info?.employeeHours || [];
+          let bottomHtml;
+          if (people.length === 0) {
+            bottomHtml = '<span class="audHours"></span>';
+          } else if (people.length <= 2) {
+            bottomHtml = `<span class="audNames">${people.map((p) => `${surnameOf(p.name)} ${p.hours.toFixed(1)}h`).join('<br>')}</span>`;
+          } else {
+            bottomHtml = `<span class="audHours">${info.totalHours.toFixed(1)}h(${people.length}人)</span>`;
+          }
           return `<button type="button" class="${cls.join(' ')}" onclick="selectAuditDate('${ds}')">
-            <span class="audNum">${day}</span>
-            <span class="audHours">${hoursLabel}</span>
+            <span class="${numCls.join(' ')}">${day}</span>
+            ${bottomHtml}
           </button>`;
         }).join('')}
       </div>
