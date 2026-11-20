@@ -95,7 +95,11 @@
   .audNum { font-size: 13px; font-weight: 600; }
   .audHours { font-size: 10px; color: var(--muted); min-height: 12px; }
   .copybtn { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 6px 10px; font-size: 12px; cursor: pointer; }
-  .tab-bar { display: flex; gap: 6px; overflow-x: auto; margin-bottom: 20px; padding-bottom: 4px; -webkit-overflow-scrolling: touch; }
+  .page-header { position: sticky; top: 0; z-index: 20; background: var(--bg); margin: -20px -16px 16px; padding: 20px 16px 0; border-bottom: 1px solid var(--border); }
+  .page-header h1 { margin: 0 0 2px; }
+  .page-header .sub { margin: 0 0 14px; }
+  .search-box { width: 100%; margin-bottom: 10px; }
+  .tab-bar { display: flex; gap: 6px; overflow-x: auto; margin-bottom: 0; padding-bottom: 12px; -webkit-overflow-scrolling: touch; }
   .tab-btn { flex: 0 0 auto; background: var(--surface); border: 1px solid var(--border); border-radius: 999px; padding: 9px 16px; font-size: 13px; font-weight: 600; cursor: pointer; color: var(--ink); white-space: nowrap; }
   .tab-btn.active { background: var(--brown); color: #fff; border-color: var(--brown); }
   .tab-panel { display: none; }
@@ -113,6 +117,7 @@
 
 <div id="mainContent" style="display: none;">
 
+<div class="page-header">
 <h1>清掃出勤管理</h1>
 <p class="sub">管理者ページ — 従業員・清掃場所・担当の登録、出勤状況の確認</p>
 
@@ -123,6 +128,7 @@
   <button class="tab-btn" data-tab="assignments" onclick="showTab('assignments')">担当</button>
   <button class="tab-btn" data-tab="summary" onclick="showTab('summary')">今月の集計</button>
   <button class="tab-btn" data-tab="audit" onclick="showTab('audit')">出勤チェック</button>
+</div>
 </div>
 
 <div class="tab-panel" data-tab="employees">
@@ -140,6 +146,7 @@
     <div id="employeeImportResult" class="meta"></div>
   </div>
 </details>
+<input id="employeeSearch" class="search-box" type="text" placeholder="🔍 名前・コードで検索" oninput="renderEmployees()" />
 <div id="employeeList"></div>
 </div>
 
@@ -160,6 +167,7 @@
     <div id="locationImportResult" class="meta"></div>
   </div>
 </details>
+<input id="locationSearch" class="search-box" type="text" placeholder="🔍 名前・コードで検索" oninput="renderLocations()" />
 <div id="locationList"></div>
 </div>
 
@@ -190,6 +198,7 @@
     <div id="scheduleImportResult" class="meta"></div>
   </div>
 </details>
+<input id="scheduleSearch" class="search-box" type="text" placeholder="🔍 場所名・コードで検索" oninput="renderSchedules()" />
 <div id="scheduleList"></div>
 </div>
 
@@ -210,6 +219,7 @@
     <div id="assignmentImportResult" class="meta"></div>
   </div>
 </details>
+<input id="assignmentSearch" class="search-box" type="text" placeholder="🔍 従業員名・場所名・コードで検索" oninput="renderAssignments()" />
 <div id="assignmentList"></div>
 </div>
 
@@ -356,6 +366,15 @@ function byCode(a, b) {
   return (a.code || '').localeCompare(b.code || '', undefined, { numeric: true, sensitivity: 'base' });
 }
 
+function searchValue(inputId) {
+  return (document.getElementById(inputId)?.value || '').trim().toLowerCase();
+}
+
+function textMatches(query, ...fields) {
+  if (!query) return true;
+  return fields.some((f) => (f || '').toLowerCase().includes(query));
+}
+
 
 async function loadAll() {
   const [e, l, s, a] = await Promise.all([
@@ -384,7 +403,10 @@ async function loadAll() {
 function renderEmployees() {
   const el = document.getElementById('employeeList');
   if (employees.length === 0) { el.innerHTML = '<p class="empty">まだ従業員が登録されていません</p>'; return; }
-  const sorted = employees.slice().sort(byCode);
+  const query = searchValue('employeeSearch');
+  const filtered = employees.filter((e) => textMatches(query, e.name, e.code));
+  if (filtered.length === 0) { el.innerHTML = '<p class="empty">該当する従業員が見つかりません</p>'; return; }
+  const sorted = filtered.sort(byCode);
   el.innerHTML = '<div class="card">' + sorted.map((emp, i) => `
     <div class="row" ${i > 0 ? '' : ''}>
       <div>
@@ -403,7 +425,10 @@ function renderEmployees() {
 function renderLocations() {
   const el = document.getElementById('locationList');
   if (locations.length === 0) { el.innerHTML = '<p class="empty">まだ清掃場所が登録されていません</p>'; return; }
-  const sorted = locations.slice().sort(byCode);
+  const query = searchValue('locationSearch');
+  const filtered = locations.filter((l) => textMatches(query, l.name, l.code));
+  if (filtered.length === 0) { el.innerHTML = '<p class="empty">該当する清掃場所が見つかりません</p>'; return; }
+  const sorted = filtered.sort(byCode);
   el.innerHTML = '<div class="card">' + sorted.map((loc) => `
     <div class="row">
       <div class="name">${loc.name} <span style="color:var(--muted); font-weight:400;">${loc.code ? '(コード: ' + loc.code + ')' : '(コード未設定)'}</span>${loc.closed_on_holidays ? ' <span class="flag" style="font-weight:600;">祝日休み</span>' : ''}</div>
@@ -433,7 +458,9 @@ function groupSchedulesByLocation() {
 function renderSchedules() {
   const el = document.getElementById('scheduleList');
   if (schedules.length === 0) { el.innerHTML = '<p class="empty">まだスケジュールが登録されていません</p>'; return; }
-  const groups = groupSchedulesByLocation();
+  const query = searchValue('scheduleSearch');
+  const groups = groupSchedulesByLocation().filter((loc) => textMatches(query, loc.name, loc.code));
+  if (groups.length === 0) { el.innerHTML = '<p class="empty">該当する清掃場所が見つかりません</p>'; return; }
   el.innerHTML = groups.map((loc) => `
     <div class="card">
       <div class="name" style="margin-bottom: 8px;">${loc.name}${loc.code ? ' <span style="color:var(--muted); font-weight:400;">(コード: ' + loc.code + ')</span>' : ''}</div>
@@ -524,7 +551,13 @@ function sortedAssignments() {
 function renderAssignments() {
   const el = document.getElementById('assignmentList');
   if (assignments.length === 0) { el.innerHTML = '<p class="empty">まだ担当が登録されていません</p>'; return; }
-  const sorted = sortedAssignments();
+  const query = searchValue('assignmentSearch');
+  const sorted = sortedAssignments().filter((a) => textMatches(
+    query,
+    a.employees?.name, a.employees?.code,
+    a.location_schedules?.locations?.name, a.location_schedules?.locations?.code
+  ));
+  if (sorted.length === 0) { el.innerHTML = '<p class="empty">該当する担当が見つかりません</p>'; return; }
   el.innerHTML = '<div class="card">' + sorted.map((a) => {
     const s = a.location_schedules;
     const label = s
