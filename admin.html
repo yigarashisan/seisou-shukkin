@@ -47,6 +47,7 @@
     cursor: pointer;
   }
   .btn-primary { background: var(--brown); color: #fff; }
+  .btn-secondary { background: var(--surface); color: var(--brown); border: 1px solid var(--border); }
   .btn-danger { background: transparent; color: var(--coral); }
   .btn-small { padding: 6px 10px; font-size: 12px; }
   .form-card {
@@ -135,9 +136,9 @@
 <h2>従業員</h2>
 <div class="form-card">
   <input id="newEmployeeCode" placeholder="コード番号(ファイルメーカー)" style="flex: 0 0 160px;" />
-  <input id="newEmployeeName" placeholder="氏名(例: 山田 太郎)" />
+  <input id="newEmployeeName" placeholder="氏名(例: 山田 太郎)" style="flex: 0 0 200px;" />
+  <button class="btn btn-secondary" onclick="searchEmployees()">🔍 検索</button>
   <button class="btn btn-primary" onclick="addEmployee()">追加</button>
-  <button class="copybtn" onclick="searchEmployees()">🔍 検索</button>
 </div>
 <details style="margin-bottom: 16px;">
   <summary style="cursor:pointer; color: var(--brown); font-size: 13px;">まとめて登録(CSV貼り付け)</summary>
@@ -155,11 +156,11 @@
 <h2>清掃場所</h2>
 <div class="form-card">
   <input id="newLocationCode" placeholder="コード番号(ファイルメーカー)" style="flex: 0 0 160px;" />
-  <input id="newLocationName" placeholder="場所名(例: 〇〇ビル)" />
-  <label style="display:flex; align-items:center; gap:4px; font-size:13px; color: var(--muted); flex: 0 0 auto;"><input type="checkbox" id="newLocationHoliday" /> 祝日は休み</label>
+  <input id="newLocationName" placeholder="場所名(例: 〇〇ビル)" style="flex: 0 0 200px;" />
+  <button class="btn btn-secondary" onclick="searchLocations()">🔍 検索</button>
   <button class="btn btn-primary" onclick="addLocation()">追加</button>
-  <button class="copybtn" onclick="searchLocations()">🔍 検索</button>
 </div>
+<p class="meta" style="margin-top: -8px;">祝日の扱いは登録後、一覧の「祝日は休みにする」から設定できます</p>
 <details style="margin-bottom: 16px;">
   <summary style="cursor:pointer; color: var(--brown); font-size: 13px;">まとめて登録(CSV貼り付け)</summary>
   <div class="form-card" style="margin-top: 8px; flex-direction: column; align-items: stretch;">
@@ -665,13 +666,11 @@ async function deleteEmployee(id) {
 async function addLocation() {
   const name = document.getElementById('newLocationName').value.trim();
   const code = document.getElementById('newLocationCode').value.trim();
-  const closed_on_holidays = document.getElementById('newLocationHoliday').checked;
   if (!name) return;
-  const { error } = await sb.from('locations').insert({ name, code: code || null, closed_on_holidays });
+  const { error } = await sb.from('locations').insert({ name, code: code || null, closed_on_holidays: false });
   if (error) { alert('登録できませんでした: ' + error.message); return; }
   document.getElementById('newLocationName').value = '';
   document.getElementById('newLocationCode').value = '';
-  document.getElementById('newLocationHoliday').checked = false;
   locationFilter = { code: '', name: '' };
   loadAll();
 }
