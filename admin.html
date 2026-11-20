@@ -828,19 +828,30 @@ function monthRange(d) {
   return { start: localDateStr(start), end: localDateStr(end) };
 }
 
+// 給与の締め期間(21日〜翌月20日)。dが21日以降ならその月の21日〜翌月20日、
+// 20日以前ならその前月の21日〜当月20日とする。endは含む(inclusive)
+function payPeriodRange(d) {
+  const y = d.getFullYear(), m = d.getMonth(), day = d.getDate();
+  const start = day >= 21 ? new Date(y, m, 21) : new Date(y, m - 1, 21);
+  const end = day >= 21 ? new Date(y, m + 1, 20) : new Date(y, m, 20);
+  return { start: localDateStr(start), end: localDateStr(end) };
+}
+
 function changeMonth(delta) {
   viewMonth.setMonth(viewMonth.getMonth() + delta);
   renderSummary();
 }
 
 async function renderSummary() {
-  document.getElementById('monthLabel').textContent = viewMonth.getFullYear() + '年' + (viewMonth.getMonth() + 1) + '月';
-  const { start, end } = monthRange(viewMonth);
+  const { start, end } = payPeriodRange(viewMonth);
+  const startLabel = `${Number(start.slice(5, 7))}月${Number(start.slice(8, 10))}日`;
+  const endLabel = `${Number(end.slice(5, 7))}月${Number(end.slice(8, 10))}日`;
+  document.getElementById('monthLabel').textContent = `${viewMonth.getFullYear()}年${viewMonth.getMonth() + 1}月分(${startLabel}〜${endLabel})`;
   const { data: records, error } = await sb
     .from('attendance_records')
     .select('*, employees(name, code), locations(name)')
     .gte('date', start)
-    .lt('date', end);
+    .lte('date', end);
 
   if (error) {
     document.getElementById('summaryBody').innerHTML = `<tr><td colspan="6" class="empty">読み込みエラー: ${error.message}</td></tr>`;
@@ -877,7 +888,7 @@ async function renderSummary() {
     return;
   }
   tbody.innerHTML = Array.from(byEmployeeLocation.values())
-    .sort((a, b) => a.name.localeCompare(b.name) || a.location.localeCompare(b.location))
+    .sort((a, b) => byCode(a, b) || a.location.localeCompare(b.location))
     .map((e) => `
     <tr>
       <td>${e.code || '-'}</td>
