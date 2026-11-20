@@ -95,6 +95,11 @@
   .audNum { font-size: 13px; font-weight: 600; }
   .audHours { font-size: 10px; color: var(--muted); min-height: 12px; }
   .copybtn { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 6px 10px; font-size: 12px; cursor: pointer; }
+  .tab-bar { display: flex; gap: 6px; overflow-x: auto; margin-bottom: 20px; padding-bottom: 4px; -webkit-overflow-scrolling: touch; }
+  .tab-btn { flex: 0 0 auto; background: var(--surface); border: 1px solid var(--border); border-radius: 999px; padding: 9px 16px; font-size: 13px; font-weight: 600; cursor: pointer; color: var(--ink); white-space: nowrap; }
+  .tab-btn.active { background: var(--brown); color: #fff; border-color: var(--brown); }
+  .tab-panel { display: none; }
+  .tab-panel.active { display: block; }
 </style>
 </head>
 <body>
@@ -111,6 +116,16 @@
 <h1>清掃出勤管理</h1>
 <p class="sub">管理者ページ — 従業員・清掃場所・担当の登録、出勤状況の確認</p>
 
+<div class="tab-bar">
+  <button class="tab-btn" data-tab="employees" onclick="showTab('employees')">従業員</button>
+  <button class="tab-btn" data-tab="locations" onclick="showTab('locations')">清掃場所</button>
+  <button class="tab-btn" data-tab="schedules" onclick="showTab('schedules')">スケジュール</button>
+  <button class="tab-btn" data-tab="assignments" onclick="showTab('assignments')">担当</button>
+  <button class="tab-btn" data-tab="summary" onclick="showTab('summary')">今月の集計</button>
+  <button class="tab-btn" data-tab="audit" onclick="showTab('audit')">出勤チェック</button>
+</div>
+
+<div class="tab-panel" data-tab="employees">
 <h2>従業員</h2>
 <div class="form-card">
   <input id="newEmployeeCode" placeholder="コード番号(ファイルメーカー)" style="flex: 0 0 160px;" />
@@ -126,7 +141,9 @@
   </div>
 </details>
 <div id="employeeList"></div>
+</div>
 
+<div class="tab-panel" data-tab="locations">
 <h2>清掃場所</h2>
 <div class="form-card">
   <input id="newLocationCode" placeholder="コード番号(ファイルメーカー)" style="flex: 0 0 160px;" />
@@ -144,7 +161,9 @@
   </div>
 </details>
 <div id="locationList"></div>
+</div>
 
+<div class="tab-panel" data-tab="schedules">
 <h2>清掃場所のスケジュール(曜日ごとの時間)</h2>
 <div class="form-card">
   <select id="scheduleLocation"></select>
@@ -172,7 +191,9 @@
   </div>
 </details>
 <div id="scheduleList"></div>
+</div>
 
+<div class="tab-panel" data-tab="assignments">
 <h2>担当(従業員 × スケジュール)</h2>
 <div class="form-card">
   <select id="assignEmployee"></select>
@@ -190,7 +211,9 @@
   </div>
 </details>
 <div id="assignmentList"></div>
+</div>
 
+<div class="tab-panel" data-tab="summary">
 <h2>今月の集計</h2>
 <div class="month-row">
   <button onclick="changeMonth(-1)">‹ 前月</button>
@@ -205,7 +228,9 @@
     <tbody id="summaryBody"></tbody>
   </table>
 </div>
+</div>
 
+<div class="tab-panel" data-tab="audit">
 <h2>清掃場所ごとの出勤チェック</h2>
 <p class="meta" style="margin-top: -8px;">出勤はがきと突き合わせる用。清掃場所と月を選ぶと、登録済みの予定(担当)と実際の記録を日ごとに比較し、記録漏れ・予定外の出勤を表示します</p>
 <div class="month-row">
@@ -218,6 +243,7 @@
 <div id="auditEmployeeTotals" class="meta" style="margin-top: -4px;"></div>
 <div id="auditGrid"></div>
 <div class="card" id="auditDetail"></div>
+</div>
 
 </div>
 
@@ -272,7 +298,16 @@ async function checkPassword() {
 function unlock() {
   document.getElementById('passwordGate').style.display = 'none';
   document.getElementById('mainContent').style.display = 'block';
+  let lastTab = 'employees';
+  try { lastTab = localStorage.getItem('seisou_admin_tab') || 'employees'; } catch (e) {}
+  showTab(lastTab);
   loadAll();
+}
+
+function showTab(name) {
+  document.querySelectorAll('.tab-panel').forEach((el) => el.classList.toggle('active', el.dataset.tab === name));
+  document.querySelectorAll('.tab-btn').forEach((el) => el.classList.toggle('active', el.dataset.tab === name));
+  try { localStorage.setItem('seisou_admin_tab', name); } catch (e) {}
 }
 
 document.getElementById('passwordInput').addEventListener('keydown', (e) => {
@@ -321,26 +356,6 @@ function byCode(a, b) {
   return (a.code || '').localeCompare(b.code || '', undefined, { numeric: true, sensitivity: 'base' });
 }
 
-const PAGE_SIZE = 5;
-let employeePage = 0;
-let locationPage = 0;
-let schedulePage = 0;
-let assignmentPage = 0;
-
-// 一覧が長くなっても該当箇所を探しやすいよう、一度に5件ずつ表示する
-function pagerHtml(page, pageSize, total, changeFnName) {
-  if (total <= pageSize) return '';
-  const totalPages = Math.max(1, Math.ceil(total / pageSize));
-  const from = total === 0 ? 0 : page * pageSize + 1;
-  const to = Math.min(total, (page + 1) * pageSize);
-  return `
-    <div style="display:flex; align-items:center; justify-content:space-between; gap:8px; margin-top:8px;">
-      <button class="copybtn" onclick="${changeFnName}(-1)" ${page <= 0 ? 'disabled' : ''}>‹ 前の${pageSize}件</button>
-      <span class="meta" style="margin:0;">${from}-${to} / 全${total}件</span>
-      <button class="copybtn" onclick="${changeFnName}(1)" ${page >= totalPages - 1 ? 'disabled' : ''}>次の${pageSize}件 ›</button>
-    </div>
-  `;
-}
 
 async function loadAll() {
   const [e, l, s, a] = await Promise.all([
@@ -366,20 +381,11 @@ async function loadAll() {
   renderAudit();
 }
 
-function changeEmployeePage(delta) {
-  const totalPages = Math.max(1, Math.ceil(employees.length / PAGE_SIZE));
-  employeePage = Math.min(Math.max(0, employeePage + delta), totalPages - 1);
-  renderEmployees();
-}
-
 function renderEmployees() {
   const el = document.getElementById('employeeList');
   if (employees.length === 0) { el.innerHTML = '<p class="empty">まだ従業員が登録されていません</p>'; return; }
   const sorted = employees.slice().sort(byCode);
-  const totalPages = Math.max(1, Math.ceil(sorted.length / PAGE_SIZE));
-  employeePage = Math.min(employeePage, totalPages - 1);
-  const visible = sorted.slice(employeePage * PAGE_SIZE, employeePage * PAGE_SIZE + PAGE_SIZE);
-  el.innerHTML = '<div class="card">' + visible.map((emp, i) => `
+  el.innerHTML = '<div class="card">' + sorted.map((emp, i) => `
     <div class="row" ${i > 0 ? '' : ''}>
       <div>
         <div class="name">${emp.name} <span style="color:var(--muted); font-weight:400;">${emp.code ? '(コード: ' + emp.code + ')' : '(コード未設定)'}</span></div>
@@ -391,23 +397,14 @@ function renderEmployees() {
         <button class="btn btn-danger btn-small" onclick="deleteEmployee('${emp.id}')">削除</button>
       </div>
     </div>
-  `).join('') + '</div>' + pagerHtml(employeePage, PAGE_SIZE, sorted.length, 'changeEmployeePage');
-}
-
-function changeLocationPage(delta) {
-  const totalPages = Math.max(1, Math.ceil(locations.length / PAGE_SIZE));
-  locationPage = Math.min(Math.max(0, locationPage + delta), totalPages - 1);
-  renderLocations();
+  `).join('') + '</div>';
 }
 
 function renderLocations() {
   const el = document.getElementById('locationList');
   if (locations.length === 0) { el.innerHTML = '<p class="empty">まだ清掃場所が登録されていません</p>'; return; }
   const sorted = locations.slice().sort(byCode);
-  const totalPages = Math.max(1, Math.ceil(sorted.length / PAGE_SIZE));
-  locationPage = Math.min(locationPage, totalPages - 1);
-  const visible = sorted.slice(locationPage * PAGE_SIZE, locationPage * PAGE_SIZE + PAGE_SIZE);
-  el.innerHTML = '<div class="card">' + visible.map((loc) => `
+  el.innerHTML = '<div class="card">' + sorted.map((loc) => `
     <div class="row">
       <div class="name">${loc.name} <span style="color:var(--muted); font-weight:400;">${loc.code ? '(コード: ' + loc.code + ')' : '(コード未設定)'}</span>${loc.closed_on_holidays ? ' <span class="flag" style="font-weight:600;">祝日休み</span>' : ''}</div>
       <div style="display:flex; gap:6px;">
@@ -416,7 +413,7 @@ function renderLocations() {
         <button class="btn btn-danger btn-small" onclick="deleteLocation('${loc.id}')">削除</button>
       </div>
     </div>
-  `).join('') + '</div>' + pagerHtml(locationPage, PAGE_SIZE, sorted.length, 'changeLocationPage');
+  `).join('') + '</div>';
 }
 
 function renderScheduleForm() {
@@ -433,20 +430,11 @@ function groupSchedulesByLocation() {
   return Array.from(byLocation.values()).sort(byCode);
 }
 
-function changeSchedulePage(delta) {
-  const totalPages = Math.max(1, Math.ceil(groupSchedulesByLocation().length / PAGE_SIZE));
-  schedulePage = Math.min(Math.max(0, schedulePage + delta), totalPages - 1);
-  renderSchedules();
-}
-
 function renderSchedules() {
   const el = document.getElementById('scheduleList');
   if (schedules.length === 0) { el.innerHTML = '<p class="empty">まだスケジュールが登録されていません</p>'; return; }
   const groups = groupSchedulesByLocation();
-  const totalPages = Math.max(1, Math.ceil(groups.length / PAGE_SIZE));
-  schedulePage = Math.min(schedulePage, totalPages - 1);
-  const visible = groups.slice(schedulePage * PAGE_SIZE, schedulePage * PAGE_SIZE + PAGE_SIZE);
-  el.innerHTML = visible.map((loc) => `
+  el.innerHTML = groups.map((loc) => `
     <div class="card">
       <div class="name" style="margin-bottom: 8px;">${loc.name}${loc.code ? ' <span style="color:var(--muted); font-weight:400;">(コード: ' + loc.code + ')</span>' : ''}</div>
       ${loc.items
@@ -458,7 +446,7 @@ function renderSchedules() {
           </div>
         `).join('')}
     </div>
-  `).join('') + pagerHtml(schedulePage, PAGE_SIZE, groups.length, 'changeSchedulePage');
+  `).join('');
 }
 
 async function addSchedule() {
@@ -533,20 +521,11 @@ function sortedAssignments() {
   );
 }
 
-function changeAssignmentPage(delta) {
-  const totalPages = Math.max(1, Math.ceil(assignments.length / PAGE_SIZE));
-  assignmentPage = Math.min(Math.max(0, assignmentPage + delta), totalPages - 1);
-  renderAssignments();
-}
-
 function renderAssignments() {
   const el = document.getElementById('assignmentList');
   if (assignments.length === 0) { el.innerHTML = '<p class="empty">まだ担当が登録されていません</p>'; return; }
   const sorted = sortedAssignments();
-  const totalPages = Math.max(1, Math.ceil(sorted.length / PAGE_SIZE));
-  assignmentPage = Math.min(assignmentPage, totalPages - 1);
-  const visible = sorted.slice(assignmentPage * PAGE_SIZE, assignmentPage * PAGE_SIZE + PAGE_SIZE);
-  el.innerHTML = '<div class="card">' + visible.map((a) => {
+  el.innerHTML = '<div class="card">' + sorted.map((a) => {
     const s = a.location_schedules;
     const label = s
       ? `${s.locations?.name ?? '?'}(${WEEKDAY_LABELS[s.day_of_week]}曜 ${s.start_time}〜${computeEndTime(s.start_time, s.standard_hours, s.break_minutes)})`
@@ -557,7 +536,7 @@ function renderAssignments() {
       <button class="btn btn-danger btn-small" onclick="deleteAssignment('${a.id}')">削除</button>
     </div>
   `;
-  }).join('') + '</div>' + pagerHtml(assignmentPage, PAGE_SIZE, sorted.length, 'changeAssignmentPage');
+  }).join('') + '</div>';
 }
 
 async function addEmployee() {
