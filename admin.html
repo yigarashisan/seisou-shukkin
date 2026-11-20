@@ -99,7 +99,6 @@
   .page-header { position: sticky; top: 0; z-index: 20; background: var(--bg); margin: -20px -16px 16px; padding: 20px 16px 0; border-bottom: 1px solid var(--border); }
   .page-header h1 { margin: 0 0 2px; }
   .page-header .sub { margin: 0 0 14px; }
-  .search-box { width: 100%; margin-bottom: 10px; }
   .tab-bar { display: flex; gap: 6px; overflow-x: auto; margin-bottom: 0; padding-bottom: 12px; -webkit-overflow-scrolling: touch; }
   .tab-btn { flex: 0 0 auto; background: var(--surface); border: 1px solid var(--border); border-radius: 999px; padding: 9px 16px; font-size: 13px; font-weight: 600; cursor: pointer; color: var(--ink); white-space: nowrap; }
   .tab-btn.active { background: var(--brown); color: #fff; border-color: var(--brown); }
@@ -190,6 +189,7 @@
   <input id="scheduleStartTime" type="time" style="flex: 0 0 110px;" />
   <input id="scheduleHours" type="number" step="0.1" placeholder="清掃時間(例: 1.5)" />
   <input id="scheduleBreak" type="number" step="1" placeholder="休憩(分、任意)" style="flex: 0 0 120px;" />
+  <button class="btn btn-secondary" onclick="searchSchedules()">🔍 検索</button>
   <button class="btn btn-primary" onclick="addSchedule()">追加</button>
 </div>
 <details style="margin-bottom: 16px;">
@@ -201,7 +201,7 @@
     <div id="scheduleImportResult" class="meta"></div>
   </div>
 </details>
-<input id="scheduleSearch" class="search-box" type="text" placeholder="🔍 場所名・コードで検索" oninput="renderSchedules()" />
+<div id="scheduleFilterNote" class="meta"></div>
 <div id="scheduleList"></div>
 </div>
 
@@ -211,6 +211,7 @@
   <select id="assignEmployee"></select>
   <select id="assignScheduleLocation" onchange="updateAssignScheduleOptions()"></select>
   <select id="assignSchedule"></select>
+  <button class="btn btn-secondary" onclick="searchAssignments()">🔍 検索</button>
   <button class="btn btn-primary" onclick="addAssignment()">追加</button>
 </div>
 <details style="margin-bottom: 16px;">
@@ -222,7 +223,7 @@
     <div id="assignmentImportResult" class="meta"></div>
   </div>
 </details>
-<input id="assignmentSearch" class="search-box" type="text" placeholder="🔍 従業員名・場所名・コードで検索" oninput="renderAssignments()" />
+<div id="assignmentFilterNote" class="meta"></div>
 <div id="assignmentList"></div>
 </div>
 
@@ -369,15 +370,6 @@ function byCode(a, b) {
   return (a.code || '').localeCompare(b.code || '', undefined, { numeric: true, sensitivity: 'base' });
 }
 
-function searchValue(inputId) {
-  return (document.getElementById(inputId)?.value || '').trim().toLowerCase();
-}
-
-function textMatches(query, ...fields) {
-  if (!query) return true;
-  return fields.some((f) => (f || '').toLowerCase().includes(query));
-}
-
 
 async function loadAll() {
   const [e, l, s, a] = await Promise.all([
@@ -489,24 +481,39 @@ function renderLocations() {
 }
 
 function renderScheduleForm() {
-  document.getElementById('scheduleLocation').innerHTML = locations.map((l) => `<option value="${l.id}">${l.name}</option>`).join('');
+  document.getElementById('scheduleLocation').innerHTML = '<option value="">(すべての清掃場所)</option>'
+    + locations.map((l) => `<option value="${l.id}">${l.name}</option>`).join('');
 }
 
 function groupSchedulesByLocation() {
   const byLocation = new Map();
   for (const s of schedules) {
     const key = s.location_id;
-    if (!byLocation.has(key)) byLocation.set(key, { code: s.locations?.code ?? '', name: s.locations?.name ?? '?', items: [] });
+    if (!byLocation.has(key)) byLocation.set(key, { id: key, code: s.locations?.code ?? '', name: s.locations?.name ?? '?', items: [] });
     byLocation.get(key).items.push(s);
   }
   return Array.from(byLocation.values()).sort(byCode);
 }
 
+let scheduleFilter = { locationId: '' };
+
+function searchSchedules() {
+  scheduleFilter = { locationId: document.getElementById('scheduleLocation').value };
+  renderSchedules();
+}
+
+function clearScheduleFilter() {
+  scheduleFilter = { locationId: '' };
+  document.getElementById('scheduleLocation').value = '';
+  renderSchedules();
+}
+
 function renderSchedules() {
   const el = document.getElementById('scheduleList');
+  const noteEl = document.getElementById('scheduleFilterNote');
+  noteEl.innerHTML = scheduleFilter.locationId ? `絞り込み中 <a href="#" onclick="clearScheduleFilter(); return false;" style="color: var(--muted); text-decoration: underline;">(解除してすべて表示)</a>` : '';
   if (schedules.length === 0) { el.innerHTML = '<p class="empty">まだスケジュールが登録されていません</p>'; return; }
-  const query = searchValue('scheduleSearch');
-  const groups = groupSchedulesByLocation().filter((loc) => textMatches(query, loc.name, loc.code));
+  const groups = groupSchedulesByLocation().filter((loc) => !scheduleFilter.locationId || loc.id === scheduleFilter.locationId);
   if (groups.length === 0) { el.innerHTML = '<p class="empty">該当する清掃場所が見つかりません</p>'; return; }
   el.innerHTML = groups.map((loc) => `
     <div class="card">
@@ -535,6 +542,7 @@ async function addSchedule() {
   document.getElementById('scheduleStartTime').value = '';
   document.getElementById('scheduleHours').value = '';
   document.getElementById('scheduleBreak').value = '';
+  scheduleFilter = { locationId: '' };
   loadAll();
 }
 
@@ -565,6 +573,7 @@ async function importSchedulesCsv() {
   }
   document.getElementById('scheduleImportResult').innerHTML = `${added}件登録` + (errors.length ? `<br>確認が必要: ${errors.length}件<br>${errors.join('<br>')}` : '');
   document.getElementById('scheduleCsv').value = '';
+  scheduleFilter = { locationId: '' };
   loadAll();
 }
 
@@ -575,8 +584,10 @@ async function deleteSchedule(id) {
 }
 
 function renderAssignmentForm() {
-  document.getElementById('assignEmployee').innerHTML = employees.map((e) => `<option value="${e.id}">${e.name}</option>`).join('');
-  document.getElementById('assignScheduleLocation').innerHTML = locations.map((l) => `<option value="${l.id}">${l.name}</option>`).join('');
+  document.getElementById('assignEmployee').innerHTML = '<option value="">(すべての従業員)</option>'
+    + employees.map((e) => `<option value="${e.id}">${e.name}</option>`).join('');
+  document.getElementById('assignScheduleLocation').innerHTML = '<option value="">(すべての清掃場所)</option>'
+    + locations.map((l) => `<option value="${l.id}">${l.name}</option>`).join('');
   updateAssignScheduleOptions();
 }
 
@@ -595,15 +606,34 @@ function sortedAssignments() {
   );
 }
 
+let assignmentFilter = { employeeId: '', locationId: '' };
+
+function searchAssignments() {
+  assignmentFilter = {
+    employeeId: document.getElementById('assignEmployee').value,
+    locationId: document.getElementById('assignScheduleLocation').value,
+  };
+  renderAssignments();
+}
+
+function clearAssignmentFilter() {
+  assignmentFilter = { employeeId: '', locationId: '' };
+  document.getElementById('assignEmployee').value = '';
+  document.getElementById('assignScheduleLocation').value = '';
+  updateAssignScheduleOptions();
+  renderAssignments();
+}
+
 function renderAssignments() {
   const el = document.getElementById('assignmentList');
+  const noteEl = document.getElementById('assignmentFilterNote');
+  const active = assignmentFilter.employeeId || assignmentFilter.locationId;
+  noteEl.innerHTML = active ? `絞り込み中 <a href="#" onclick="clearAssignmentFilter(); return false;" style="color: var(--muted); text-decoration: underline;">(解除してすべて表示)</a>` : '';
   if (assignments.length === 0) { el.innerHTML = '<p class="empty">まだ担当が登録されていません</p>'; return; }
-  const query = searchValue('assignmentSearch');
-  const sorted = sortedAssignments().filter((a) => textMatches(
-    query,
-    a.employees?.name, a.employees?.code,
-    a.location_schedules?.locations?.name, a.location_schedules?.locations?.code
-  ));
+  const sorted = sortedAssignments().filter((a) =>
+    (!assignmentFilter.employeeId || a.employee_id === assignmentFilter.employeeId) &&
+    (!assignmentFilter.locationId || a.location_schedules?.location_id === assignmentFilter.locationId)
+  );
   if (sorted.length === 0) { el.innerHTML = '<p class="empty">該当する担当が見つかりません</p>'; return; }
   el.innerHTML = '<div class="card">' + sorted.map((a) => {
     const s = a.location_schedules;
@@ -719,6 +749,7 @@ async function addAssignment() {
   if (!employee_id || !schedule_id) { alert('従業員とスケジュールを選択してください'); return; }
   const { error } = await sb.from('assignments').insert({ employee_id, schedule_id });
   if (error) { alert('登録できませんでした: ' + error.message); return; }
+  assignmentFilter = { employeeId: '', locationId: '' };
   loadAll();
 }
 
@@ -767,6 +798,7 @@ async function importAssignmentsCsv() {
   }
   document.getElementById('assignmentImportResult').innerHTML = `${added}件登録` + (errors.length ? `<br>確認が必要: ${errors.length}件<br>${errors.join('<br>')}` : '');
   document.getElementById('assignmentCsv').value = '';
+  assignmentFilter = { employeeId: '', locationId: '' };
   loadAll();
 }
 
