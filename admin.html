@@ -923,17 +923,21 @@ let auditSelectedDate = null;
 // 清掃場所を1つ選び、その場所の「予定(担当登録)」と「実績(出勤記録)」を日ごとに突き合わせる。
 // 出勤はがきの内容(誰が来るはずで、実際に誰が来たか)をそのまま再現できるようにしている
 async function renderAudit() {
-  document.getElementById('auditMonthLabel').textContent = auditMonth.getFullYear() + '年' + (auditMonth.getMonth() + 1) + '月';
+  const { start, end } = payPeriodRange(auditMonth);
+  const startLabel = `${Number(start.slice(5, 7))}月${Number(start.slice(8, 10))}日`;
+  const endLabel = `${Number(end.slice(5, 7))}月${Number(end.slice(8, 10))}日`;
+  document.getElementById('auditMonthLabel').textContent = `${auditMonth.getFullYear()}年${auditMonth.getMonth() + 1}月分(${startLabel}〜${endLabel})`;
   const gridEl = document.getElementById('auditGrid');
   const locationId = document.getElementById('auditLocation').value;
   if (!locationId) { gridEl.innerHTML = '<p class="empty">清掃場所がありません</p>'; document.getElementById('auditDetail').innerHTML = ''; document.getElementById('auditMonthTotal').textContent = '-'; document.getElementById('auditEmployeeTotals').innerHTML = ''; return; }
   const loc = locations.find((l) => l.id === locationId);
 
-  const { start, end } = monthRange(auditMonth);
-  const [{ data: records, error }, holidaySet] = await Promise.all([
-    sb.from('attendance_records').select('*, employees(name)').eq('location_id', locationId).gte('date', start).lt('date', end),
-    loc?.closed_on_holidays ? getHolidaySet(auditMonth.getFullYear()) : Promise.resolve(new Set()),
+  const [{ data: records, error }, holidaySetStart, holidaySetEnd] = await Promise.all([
+    sb.from('attendance_records').select('*, employees(name)').eq('location_id', locationId).gte('date', start).lte('date', end),
+    loc?.closed_on_holidays ? getHolidaySet(new Date(start).getFullYear()) : Promise.resolve(new Set()),
+    loc?.closed_on_holidays ? getHolidaySet(new Date(end).getFullYear()) : Promise.resolve(new Set()),
   ]);
+  const holidaySet = new Set([...holidaySetStart, ...holidaySetEnd]);
   if (error) { gridEl.innerHTML = `<p class="empty">読み込みエラー: ${error.message}</p>`; document.getElementById('auditDetail').innerHTML = ''; document.getElementById('auditMonthTotal').textContent = '-'; document.getElementById('auditEmployeeTotals').innerHTML = ''; return; }
 
   const recordsByDate = new Map();
@@ -944,7 +948,7 @@ async function renderAudit() {
   const locSchedules = schedules.filter((s) => s.location_id === locationId);
 
   auditDayInfo = new Map();
-  for (let d = new Date(start); d < new Date(end); d.setDate(d.getDate() + 1)) {
+  for (let d = new Date(start); d <= new Date(end); d.setDate(d.getDate() + 1)) {
     const ds = d.toISOString().slice(0, 10);
     const dow = d.getDay();
     const isHoliday = holidaySet.has(ds);
@@ -1016,13 +1020,11 @@ async function renderAudit() {
 
 function renderAuditGrid() {
   const gridEl = document.getElementById('auditGrid');
-  const { start, end } = monthRange(auditMonth);
+  const { start, end } = payPeriodRange(auditMonth);
   const firstDow = new Date(start).getDay();
-  const daysInMonth = Math.round((new Date(end) - new Date(start)) / 86400000);
-  const monthPrefix = start.slice(0, 7);
   const cells = [];
   for (let i = 0; i < firstDow; i++) cells.push(null);
-  for (let day = 1; day <= daysInMonth; day++) cells.push(`${monthPrefix}-${String(day).padStart(2, '0')}`);
+  for (let d = new Date(start); d <= new Date(end); d.setDate(d.getDate() + 1)) cells.push(d.toISOString().slice(0, 10));
   while (cells.length % 7 !== 0) cells.push(null);
 
   gridEl.innerHTML = `
