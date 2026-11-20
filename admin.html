@@ -315,12 +315,39 @@ function personalLink(slug) {
   return window.location.href.replace(/admin\.html.*$/, 'index.html') + '?e=' + slug;
 }
 
+// コード番号の昇順で並べる(文字列として比べると "E2" が "E10" より後ろに来てしまうため、
+// numeric: true で数字部分を数として比較する)
+function byCode(a, b) {
+  return (a.code || '').localeCompare(b.code || '', undefined, { numeric: true, sensitivity: 'base' });
+}
+
+const PAGE_SIZE = 5;
+let employeePage = 0;
+let locationPage = 0;
+let schedulePage = 0;
+let assignmentPage = 0;
+
+// 一覧が長くなっても該当箇所を探しやすいよう、一度に5件ずつ表示する
+function pagerHtml(page, pageSize, total, changeFnName) {
+  if (total <= pageSize) return '';
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+  const from = total === 0 ? 0 : page * pageSize + 1;
+  const to = Math.min(total, (page + 1) * pageSize);
+  return `
+    <div style="display:flex; align-items:center; justify-content:space-between; gap:8px; margin-top:8px;">
+      <button class="copybtn" onclick="${changeFnName}(-1)" ${page <= 0 ? 'disabled' : ''}>‹ 前の${pageSize}件</button>
+      <span class="meta" style="margin:0;">${from}-${to} / 全${total}件</span>
+      <button class="copybtn" onclick="${changeFnName}(1)" ${page >= totalPages - 1 ? 'disabled' : ''}>次の${pageSize}件 ›</button>
+    </div>
+  `;
+}
+
 async function loadAll() {
   const [e, l, s, a] = await Promise.all([
     sb.from('employees').select('*').order('name'),
     sb.from('locations').select('*').order('name'),
-    sb.from('location_schedules').select('*, locations(name)'),
-    sb.from('assignments').select('*, employees(name), location_schedules(day_of_week, start_time, standard_hours, break_minutes, location_id, locations(name))'),
+    sb.from('location_schedules').select('*, locations(name, code)'),
+    sb.from('assignments').select('*, employees(name, code), location_schedules(day_of_week, start_time, standard_hours, break_minutes, location_id, locations(name, code))'),
   ]);
   const loadErrors = [e, l, s, a].map((r) => r.error).filter(Boolean);
   if (loadErrors.length) alert('データの読み込みに失敗しました: ' + loadErrors.map((err) => err.message).join(' / '));
@@ -339,10 +366,20 @@ async function loadAll() {
   renderAudit();
 }
 
+function changeEmployeePage(delta) {
+  const totalPages = Math.max(1, Math.ceil(employees.length / PAGE_SIZE));
+  employeePage = Math.min(Math.max(0, employeePage + delta), totalPages - 1);
+  renderEmployees();
+}
+
 function renderEmployees() {
   const el = document.getElementById('employeeList');
   if (employees.length === 0) { el.innerHTML = '<p class="empty">まだ従業員が登録されていません</p>'; return; }
-  el.innerHTML = '<div class="card">' + employees.map((emp, i) => `
+  const sorted = employees.slice().sort(byCode);
+  const totalPages = Math.max(1, Math.ceil(sorted.length / PAGE_SIZE));
+  employeePage = Math.min(employeePage, totalPages - 1);
+  const visible = sorted.slice(employeePage * PAGE_SIZE, employeePage * PAGE_SIZE + PAGE_SIZE);
+  el.innerHTML = '<div class="card">' + visible.map((emp, i) => `
     <div class="row" ${i > 0 ? '' : ''}>
       <div>
         <div class="name">${emp.name} <span style="color:var(--muted); font-weight:400;">${emp.code ? '(コード: ' + emp.code + ')' : '(コード未設定)'}</span></div>
@@ -354,13 +391,23 @@ function renderEmployees() {
         <button class="btn btn-danger btn-small" onclick="deleteEmployee('${emp.id}')">削除</button>
       </div>
     </div>
-  `).join('') + '</div>';
+  `).join('') + '</div>' + pagerHtml(employeePage, PAGE_SIZE, sorted.length, 'changeEmployeePage');
+}
+
+function changeLocationPage(delta) {
+  const totalPages = Math.max(1, Math.ceil(locations.length / PAGE_SIZE));
+  locationPage = Math.min(Math.max(0, locationPage + delta), totalPages - 1);
+  renderLocations();
 }
 
 function renderLocations() {
   const el = document.getElementById('locationList');
   if (locations.length === 0) { el.innerHTML = '<p class="empty">まだ清掃場所が登録されていません</p>'; return; }
-  el.innerHTML = '<div class="card">' + locations.map((loc) => `
+  const sorted = locations.slice().sort(byCode);
+  const totalPages = Math.max(1, Math.ceil(sorted.length / PAGE_SIZE));
+  locationPage = Math.min(locationPage, totalPages - 1);
+  const visible = sorted.slice(locationPage * PAGE_SIZE, locationPage * PAGE_SIZE + PAGE_SIZE);
+  el.innerHTML = '<div class="card">' + visible.map((loc) => `
     <div class="row">
       <div class="name">${loc.name} <span style="color:var(--muted); font-weight:400;">${loc.code ? '(コード: ' + loc.code + ')' : '(コード未設定)'}</span>${loc.closed_on_holidays ? ' <span class="flag" style="font-weight:600;">祝日休み</span>' : ''}</div>
       <div style="display:flex; gap:6px;">
@@ -369,25 +416,39 @@ function renderLocations() {
         <button class="btn btn-danger btn-small" onclick="deleteLocation('${loc.id}')">削除</button>
       </div>
     </div>
-  `).join('') + '</div>';
+  `).join('') + '</div>' + pagerHtml(locationPage, PAGE_SIZE, sorted.length, 'changeLocationPage');
 }
 
 function renderScheduleForm() {
   document.getElementById('scheduleLocation').innerHTML = locations.map((l) => `<option value="${l.id}">${l.name}</option>`).join('');
 }
 
-function renderSchedules() {
-  const el = document.getElementById('scheduleList');
-  if (schedules.length === 0) { el.innerHTML = '<p class="empty">まだスケジュールが登録されていません</p>'; return; }
+function groupSchedulesByLocation() {
   const byLocation = new Map();
   for (const s of schedules) {
     const key = s.location_id;
-    if (!byLocation.has(key)) byLocation.set(key, { name: s.locations?.name ?? '?', items: [] });
+    if (!byLocation.has(key)) byLocation.set(key, { code: s.locations?.code ?? '', name: s.locations?.name ?? '?', items: [] });
     byLocation.get(key).items.push(s);
   }
-  el.innerHTML = Array.from(byLocation.values()).map((loc) => `
+  return Array.from(byLocation.values()).sort(byCode);
+}
+
+function changeSchedulePage(delta) {
+  const totalPages = Math.max(1, Math.ceil(groupSchedulesByLocation().length / PAGE_SIZE));
+  schedulePage = Math.min(Math.max(0, schedulePage + delta), totalPages - 1);
+  renderSchedules();
+}
+
+function renderSchedules() {
+  const el = document.getElementById('scheduleList');
+  if (schedules.length === 0) { el.innerHTML = '<p class="empty">まだスケジュールが登録されていません</p>'; return; }
+  const groups = groupSchedulesByLocation();
+  const totalPages = Math.max(1, Math.ceil(groups.length / PAGE_SIZE));
+  schedulePage = Math.min(schedulePage, totalPages - 1);
+  const visible = groups.slice(schedulePage * PAGE_SIZE, schedulePage * PAGE_SIZE + PAGE_SIZE);
+  el.innerHTML = visible.map((loc) => `
     <div class="card">
-      <div class="name" style="margin-bottom: 8px;">${loc.name}</div>
+      <div class="name" style="margin-bottom: 8px;">${loc.name}${loc.code ? ' <span style="color:var(--muted); font-weight:400;">(コード: ' + loc.code + ')</span>' : ''}</div>
       ${loc.items
         .sort((a, b) => a.day_of_week - b.day_of_week || a.start_time.localeCompare(b.start_time))
         .map((s, i) => `
@@ -397,7 +458,7 @@ function renderSchedules() {
           </div>
         `).join('')}
     </div>
-  `).join('');
+  `).join('') + pagerHtml(schedulePage, PAGE_SIZE, groups.length, 'changeSchedulePage');
 }
 
 async function addSchedule() {
@@ -466,10 +527,26 @@ function updateAssignScheduleOptions() {
   document.getElementById('assignSchedule').innerHTML = opts.length ? opts.join('') : '<option value="">(この場所のスケジュール未登録)</option>';
 }
 
+function sortedAssignments() {
+  return assignments.slice().sort((a, b) =>
+    byCode(a.employees ?? {}, b.employees ?? {}) || byCode(a.location_schedules?.locations ?? {}, b.location_schedules?.locations ?? {})
+  );
+}
+
+function changeAssignmentPage(delta) {
+  const totalPages = Math.max(1, Math.ceil(assignments.length / PAGE_SIZE));
+  assignmentPage = Math.min(Math.max(0, assignmentPage + delta), totalPages - 1);
+  renderAssignments();
+}
+
 function renderAssignments() {
   const el = document.getElementById('assignmentList');
   if (assignments.length === 0) { el.innerHTML = '<p class="empty">まだ担当が登録されていません</p>'; return; }
-  el.innerHTML = '<div class="card">' + assignments.map((a) => {
+  const sorted = sortedAssignments();
+  const totalPages = Math.max(1, Math.ceil(sorted.length / PAGE_SIZE));
+  assignmentPage = Math.min(assignmentPage, totalPages - 1);
+  const visible = sorted.slice(assignmentPage * PAGE_SIZE, assignmentPage * PAGE_SIZE + PAGE_SIZE);
+  el.innerHTML = '<div class="card">' + visible.map((a) => {
     const s = a.location_schedules;
     const label = s
       ? `${s.locations?.name ?? '?'}(${WEEKDAY_LABELS[s.day_of_week]}曜 ${s.start_time}〜${computeEndTime(s.start_time, s.standard_hours, s.break_minutes)})`
@@ -480,7 +557,7 @@ function renderAssignments() {
       <button class="btn btn-danger btn-small" onclick="deleteAssignment('${a.id}')">削除</button>
     </div>
   `;
-  }).join('') + '</div>';
+  }).join('') + '</div>' + pagerHtml(assignmentPage, PAGE_SIZE, sorted.length, 'changeAssignmentPage');
 }
 
 async function addEmployee() {
