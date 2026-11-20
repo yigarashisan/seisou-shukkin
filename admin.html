@@ -598,7 +598,8 @@ function updateAssignScheduleOptions() {
     .filter((s) => s.location_id === locId)
     .sort((a, b) => a.day_of_week - b.day_of_week || a.start_time.localeCompare(b.start_time))
     .map((s) => `<option value="${s.id}">${WEEKDAY_LABELS[s.day_of_week]}曜 ${s.start_time}〜${computeEndTime(s.start_time, s.standard_hours, s.break_minutes)}</option>`);
-  document.getElementById('assignSchedule').innerHTML = opts.length ? opts.join('') : '<option value="">(この場所のスケジュール未登録)</option>';
+  const placeholder = locId ? '(この場所のスケジュール未登録)' : '(例)月曜07:00〜10:30';
+  document.getElementById('assignSchedule').innerHTML = opts.length ? opts.join('') : `<option value="">${placeholder}</option>`;
 }
 
 function sortedAssignments() {
@@ -641,15 +642,12 @@ function renderAssignments() {
   if (sorted.length === 0) { el.innerHTML = '<p class="empty">該当する担当が見つかりません</p>'; return; }
   el.innerHTML = '<div class="card">' + sorted.map((a) => {
     const s = a.location_schedules;
-    const timeLabel = s
-      ? `${WEEKDAY_LABELS[s.day_of_week]}曜 ${s.start_time}〜${computeEndTime(s.start_time, s.standard_hours, s.break_minutes)}`
+    const label = s
+      ? `${s.locations?.name ?? '?'}(${WEEKDAY_LABELS[s.day_of_week]}曜 ${s.start_time}〜${computeEndTime(s.start_time, s.standard_hours, s.break_minutes)})`
       : '(スケジュール不明)';
     return `
     <div class="row">
-      <div>
-        <div class="name">${a.employees?.name ?? '?'} × ${s?.locations?.name ?? '?'}</div>
-        <div class="meta">${timeLabel}</div>
-      </div>
+      <div class="name">${a.employees?.name ?? '?'} × ${label}</div>
       <button class="btn btn-danger btn-small" onclick="deleteAssignment('${a.id}')">削除</button>
     </div>
   `;
