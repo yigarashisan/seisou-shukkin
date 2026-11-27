@@ -267,12 +267,11 @@
 <div class="card" id="summaryCard">
   <table>
     <thead>
-      <tr><th>コード</th><th>従業員</th><th>場所</th><th>出勤日数</th><th>合計時間</th><th>立替金</th><th>備考</th></tr>
+      <tr><th>コード</th><th>従業員</th><th>場所</th><th>出勤日数</th><th>合計時間</th><th>立替金</th><th>備考</th><th></th></tr>
     </thead>
     <tbody id="summaryBody"></tbody>
   </table>
 </div>
-<button class="copybtn" onclick="toggleSummaryDetail()">詳細を表示</button>
 <div class="card" id="summaryDetail" style="display:none; margin-top:10px;"></div>
 </div>
 
@@ -966,25 +965,28 @@ async function renderSummary() {
   ]);
 
   if (error) {
-    document.getElementById('summaryBody').innerHTML = `<tr><td colspan="7" class="empty">読み込みエラー: ${error.message}</td></tr>`;
+    document.getElementById('summaryBody').innerHTML = `<tr><td colspan="8" class="empty">読み込みエラー: ${error.message}</td></tr>`;
     return;
   }
   if (reimbError) { alert('立替金の読み込みに失敗しました: ' + reimbError.message); }
 
+  summaryRecords = records || [];
+  summaryReimbursements = reimbData || [];
+  document.getElementById('summaryDetail').style.display = 'none';
+
   const reimbByEmployee = new Map();
-  summaryDetailData.reimbItems = [];
-  for (const r of reimbData || []) {
+  for (const r of summaryReimbursements) {
     if (!reimbByEmployee.has(r.employee_id)) reimbByEmployee.set(r.employee_id, 0);
     reimbByEmployee.set(r.employee_id, reimbByEmployee.get(r.employee_id) + Number(r.amount));
   }
 
   const byEmployeeLocation = new Map();
-  summaryDetailData.timeNotes = [];
-  for (const r of records || []) {
+  for (const r of summaryRecords) {
     const key = r.employee_id + '|' + r.location_id;
     if (!byEmployeeLocation.has(key)) {
       byEmployeeLocation.set(key, {
         employeeId: r.employee_id,
+        locationId: r.location_id,
         name: r.employees?.name ?? '?',
         code: r.employees?.code ?? '',
         location: r.locations?.name ?? '?',
@@ -996,23 +998,12 @@ async function renderSummary() {
     const entry = byEmployeeLocation.get(key);
     entry.days += 1;
     entry.hours += Number(r.hours);
-    if (!r.is_standard) {
-      entry.hasNotes = true;
-      const timeInfo = r.actual_start_time && r.actual_end_time
-        ? `${r.actual_start_time}〜${r.actual_end_time}${r.actual_break_minutes ? '(休憩' + r.actual_break_minutes + '分)' : ''}`
-        : `${r.hours}h`;
-      summaryDetailData.timeNotes.push(`${entry.code || '-'} ${entry.name}(${entry.location}) ${r.date}: ${timeInfo} — ${r.reason ?? ''}`);
-    }
-  }
-  for (const r of reimbData || []) {
-    const emp = employees.find((x) => x.id === r.employee_id);
-    summaryDetailData.reimbItems.push(`${emp?.code || '-'} ${emp?.name ?? '?'} ${r.date}: ${r.content}(${Number(r.amount).toLocaleString()}円)`);
+    if (!r.is_standard) entry.hasNotes = true;
   }
 
   const tbody = document.getElementById('summaryBody');
   if (byEmployeeLocation.size === 0) {
-    tbody.innerHTML = '<tr><td colspan="7" class="empty">この月の記録はまだありません</td></tr>';
-    renderSummaryDetail();
+    tbody.innerHTML = '<tr><td colspan="8" class="empty">この月の記録はまだありません</td></tr>';
     return;
   }
   tbody.innerHTML = Array.from(byEmployeeLocation.values())
@@ -1028,28 +1019,43 @@ async function renderSummary() {
       <td>${e.hours.toFixed(1)}時間</td>
       <td>${reimbTotal ? reimbTotal.toLocaleString() + '円' : '-'}</td>
       <td>${e.hasNotes ? '<span class="flag">あり</span>' : '-'}</td>
+      <td><button class="copybtn" onclick="showRowDetail('${e.employeeId}', '${e.locationId}')">詳細</button></td>
     </tr>
   `;
     }).join('');
-  renderSummaryDetail();
 }
 
-let summaryDetailData = { timeNotes: [], reimbItems: [] };
+let summaryRecords = [];
+let summaryReimbursements = [];
 
-function toggleSummaryDetail() {
+function showRowDetail(employeeId, locationId) {
+  const rows = summaryRecords
+    .filter((r) => r.employee_id === employeeId && r.location_id === locationId)
+    .sort((a, b) => a.date.localeCompare(b.date));
+  if (rows.length === 0) return;
+  const empName = rows[0].employees?.name ?? '?';
+  const locName = rows[0].locations?.name ?? '?';
+  const dayLines = rows.map((r) => {
+    const timeInfo = r.is_standard
+      ? `${r.hours}時間`
+      : `${r.actual_start_time ?? '?'}〜${r.actual_end_time ?? '?'}${r.actual_break_minutes ? '(休憩' + r.actual_break_minutes + '分)' : ''}、${r.hours}時間 — ${r.reason ?? ''}`;
+    return `<tr><td>${r.date}(${WEEKDAY_LABELS[new Date(r.date + 'T00:00:00').getDay()]})</td><td>${r.is_standard ? '通常' : '通常と違う'}</td><td>${timeInfo}</td></tr>`;
+  }).join('');
+  const myReimb = summaryReimbursements.filter((r) => r.employee_id === employeeId);
+  const reimbLines = myReimb.length
+    ? `<div class="name" style="margin:14px 0 6px;">立替金(この従業員・期間全体分)</div><p class="meta">${myReimb.map((r) => `${r.date}: ${r.content}(${Number(r.amount).toLocaleString()}円)`).join('<br>')}</p>`
+    : '';
   const el = document.getElementById('summaryDetail');
-  el.style.display = el.style.display === 'none' ? 'block' : 'none';
-}
-
-function renderSummaryDetail() {
-  const el = document.getElementById('summaryDetail');
-  const { timeNotes, reimbItems } = summaryDetailData;
   el.innerHTML = `
-    <div class="name" style="margin-bottom:6px;">通常と時間が異なる記録</div>
-    <p class="meta">${timeNotes.length ? timeNotes.join('<br>') : 'この月はありません'}</p>
-    <div class="name" style="margin:14px 0 6px;">立替金の内訳</div>
-    <p class="meta">${reimbItems.length ? reimbItems.join('<br>') : 'この月はありません'}</p>
+    <div class="name" style="margin-bottom:6px;">${empName} ・ ${locName}(${rows.length}日分)</div>
+    <table>
+      <thead><tr><th>日付</th><th>区分</th><th>時間</th></tr></thead>
+      <tbody>${dayLines}</tbody>
+    </table>
+    ${reimbLines}
   `;
+  el.style.display = 'block';
+  el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 }
 
 function renderAuditLocationOptions() {
