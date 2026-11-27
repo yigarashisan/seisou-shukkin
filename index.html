@@ -216,8 +216,17 @@ function payPeriodRange(base) {
   return { start: new Date(y, m - 1, 21), end: new Date(y, m, 20) };
 }
 
+// 令和は2019年が元年。この数字計算は令和の期間(2019年5月以降)のみを想定している
+function reiwaYear(y) {
+  return y - 2018;
+}
+
+function wareki(d) {
+  return `令和${reiwaYear(d.getFullYear())}年${d.getMonth() + 1}月${d.getDate()}日`;
+}
+
 function formatPeriodLabel() {
-  return `${periodStart.getMonth() + 1}月${periodStart.getDate()}日 〜 ${periodEnd.getMonth() + 1}月${periodEnd.getDate()}日`;
+  return `${wareki(periodStart)} 〜 ${wareki(periodEnd)}`;
 }
 
 function buildCalendarDays() {
