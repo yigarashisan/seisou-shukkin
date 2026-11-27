@@ -267,7 +267,7 @@
 <div class="card" id="summaryCard">
   <table>
     <thead>
-      <tr><th>コード</th><th>従業員</th><th>場所</th><th>出勤日数</th><th>合計時間</th><th>立替金</th><th>備考</th><th></th></tr>
+      <tr><th>コード</th><th>従業員</th><th>場所</th><th>出勤日数</th><th>合計時間</th><th>立替金</th><th>確認</th><th>備考</th><th></th></tr>
     </thead>
     <tbody id="summaryBody"></tbody>
   </table>
@@ -959,20 +959,25 @@ async function renderSummary() {
   const startLabel = `${Number(start.slice(5, 7))}月${Number(start.slice(8, 10))}日`;
   const endLabel = `${Number(end.slice(5, 7))}月${Number(end.slice(8, 10))}日`;
   document.getElementById('monthLabel').textContent = `${viewMonth.getFullYear()}年${viewMonth.getMonth() + 1}月分(${startLabel}〜${endLabel})`;
-  const [{ data: records, error }, { data: reimbData, error: reimbError }] = await Promise.all([
+  const [{ data: records, error }, { data: reimbData, error: reimbError }, { data: confirmData, error: confirmError }] = await Promise.all([
     sb.from('attendance_records').select('*, employees(name, code), locations(name)').gte('date', start).lte('date', end),
     sb.from('reimbursements').select('*').gte('date', start).lte('date', end),
+    sb.from('period_confirmations').select('*').eq('period_end', end),
   ]);
 
   if (error) {
-    document.getElementById('summaryBody').innerHTML = `<tr><td colspan="8" class="empty">読み込みエラー: ${error.message}</td></tr>`;
+    document.getElementById('summaryBody').innerHTML = `<tr><td colspan="9" class="empty">読み込みエラー: ${error.message}</td></tr>`;
     return;
   }
   if (reimbError) { alert('立替金の読み込みに失敗しました: ' + reimbError.message); }
+  if (confirmError) { alert('確認状況の読み込みに失敗しました: ' + confirmError.message); }
 
   summaryRecords = records || [];
   summaryReimbursements = reimbData || [];
+  summaryConfirmations = confirmData || [];
   document.getElementById('summaryDetail').style.display = 'none';
+
+  const confirmByEmployee = new Map(summaryConfirmations.map((c) => [c.employee_id, c]));
 
   const reimbByEmployee = new Map();
   for (const r of summaryReimbursements) {
@@ -1003,13 +1008,14 @@ async function renderSummary() {
 
   const tbody = document.getElementById('summaryBody');
   if (byEmployeeLocation.size === 0) {
-    tbody.innerHTML = '<tr><td colspan="8" class="empty">この月の記録はまだありません</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="9" class="empty">この月の記録はまだありません</td></tr>';
     return;
   }
   tbody.innerHTML = Array.from(byEmployeeLocation.values())
     .sort((a, b) => byCode(a, b) || a.location.localeCompare(b.location))
     .map((e) => {
       const reimbTotal = reimbByEmployee.get(e.employeeId);
+      const confirmed = confirmByEmployee.has(e.employeeId);
       return `
     <tr>
       <td>${e.code || '-'}</td>
@@ -1018,6 +1024,7 @@ async function renderSummary() {
       <td>${e.days}日</td>
       <td>${e.hours.toFixed(1)}時間</td>
       <td>${reimbTotal ? reimbTotal.toLocaleString() + '円' : '-'}</td>
+      <td>${confirmed ? '<span class="auditOk">✓</span>' : '-'}</td>
       <td>${e.hasNotes ? '<span class="flag">あり</span>' : '-'}</td>
       <td><button class="copybtn" onclick="showRowDetail('${e.employeeId}', '${e.locationId}')">詳細</button></td>
     </tr>
@@ -1027,6 +1034,7 @@ async function renderSummary() {
 
 let summaryRecords = [];
 let summaryReimbursements = [];
+let summaryConfirmations = [];
 
 function showRowDetail(employeeId, locationId) {
   const rows = summaryRecords
@@ -1045,6 +1053,10 @@ function showRowDetail(employeeId, locationId) {
   const reimbLines = myReimb.length
     ? `<div class="name" style="margin:14px 0 6px;">立替金(この従業員・期間全体分)</div><p class="meta">${myReimb.map((r) => `${r.date}: ${r.content}(${Number(r.amount).toLocaleString()}円)`).join('<br>')}</p>`
     : '';
+  const confirmation = summaryConfirmations.find((c) => c.employee_id === employeeId);
+  const confirmLines = confirmation
+    ? `<div class="name" style="margin:14px 0 6px;">期間の確認</div><p class="meta">✓ 確認済み${confirmation.note ? '(メモ: ' + confirmation.note + ')' : ''} <button class="copybtn" onclick="unlockPeriodConfirmation('${confirmation.id}')">確認を取り消す</button></p>`
+    : `<div class="name" style="margin:14px 0 6px;">期間の確認</div><p class="meta">まだ確認されていません</p>`;
   const el = document.getElementById('summaryDetail');
   el.innerHTML = `
     <div class="name" style="margin-bottom:6px;">${empName} ・ ${locName}(${rows.length}日分)</div>
@@ -1053,9 +1065,16 @@ function showRowDetail(employeeId, locationId) {
       <tbody>${dayLines}</tbody>
     </table>
     ${reimbLines}
+    ${confirmLines}
   `;
   el.style.display = 'block';
   el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+async function unlockPeriodConfirmation(id) {
+  if (!confirm('この期間の確認を取り消しますか?(従業員側で再び記録の追加・変更ができるようになります)')) return;
+  await sb.from('period_confirmations').delete().eq('id', id);
+  renderSummary();
 }
 
 function renderAuditLocationOptions() {

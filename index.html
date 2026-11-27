@@ -160,6 +160,7 @@ let selectedDate = null;
 let holidaySet = new Set();
 const holidayCache = new Map();
 let reimbursements = [];
+let periodConfirmation = null;
 
 const WEEKDAY_LABELS = ['日', '月', '火', '水', '木', '金', '土'];
 
@@ -350,7 +351,7 @@ async function init() {
   periodEnd = range.end;
   selectedDate = todayStr();
 
-  await Promise.all([loadRecent(), loadPeriodDates(), loadHolidaySet(), loadReimbursements()]);
+  await Promise.all([loadRecent(), loadPeriodDates(), loadHolidaySet(), loadReimbursements(), loadPeriodConfirmation()]);
   renderMain();
 }
 
@@ -386,6 +387,7 @@ function renderMain() {
     <div id="daySection"></div>
     ${renderHistoryHtml()}
     ${renderReimbursementHtml()}
+    ${renderPeriodConfirmHtml()}
   `;
   renderDayForSelected();
 }
@@ -445,8 +447,18 @@ async function renderConfirmInto(container) {
         <div class="doneIcon">✅</div>
         <div class="doneMsg">${dateLbl}の記録は入力済みです</div>
         <div class="doneSub">${selectedAssignment.location_name} / ${recordDetailLabel(existing, selectedAssignment)}</div>
-        <button class="linklike" onclick="deleteRecord('${existing.id}')">この記録を取り消す</button>
+        ${isPeriodLocked() ? '' : `<button class="linklike" onclick="deleteRecord('${existing.id}')">この記録を取り消す</button>`}
         ${reimbursementSectionHtml()}
+      </div>
+      ${myAssignments.length > 1 ? `<button class="linklike" onclick="renderChoiceInto(document.getElementById('daySection'), myAssignments)">別の場所を記録する</button>` : ''}
+    `;
+    return;
+  }
+
+  if (isPeriodLocked()) {
+    container.innerHTML = `
+      <div class="card">
+        <div class="doneSub">${dateLbl}は未記録ですが、この期間はすでに確定済みのため記録できません。必要な場合は管理者にご連絡ください。</div>
       </div>
       ${myAssignments.length > 1 ? `<button class="linklike" onclick="renderChoiceInto(document.getElementById('daySection'), myAssignments)">別の場所を記録する</button>` : ''}
     `;
@@ -482,6 +494,7 @@ function toggleCorrectForm() {
 }
 
 async function recordStandard() {
+  if (blockIfLocked()) return;
   const { error } = await sb.from('attendance_records').insert({
     employee_id: employee.id,
     location_id: selectedAssignment.location_id,
@@ -494,6 +507,7 @@ async function recordStandard() {
 }
 
 async function recordCorrected() {
+  if (blockIfLocked()) return;
   const actualStart = document.getElementById('actualStart').value;
   const actualEnd = document.getElementById('actualEnd').value;
   const actualBreak = parseInt(document.getElementById('actualBreak').value, 10) || 0;
@@ -523,6 +537,7 @@ async function afterRecord() {
 }
 
 async function deleteRecord(id) {
+  if (blockIfLocked()) return;
   if (!confirm('この記録を取り消しますか?')) return;
   await sb.from('attendance_records').delete().eq('id', id);
   await afterRecord();
@@ -539,6 +554,61 @@ async function loadReimbursements() {
   reimbursements = data || [];
 }
 
+async function loadPeriodConfirmation() {
+  const { data } = await sb
+    .from('period_confirmations')
+    .select('*')
+    .eq('employee_id', employee.id)
+    .eq('period_end', dateStr(periodEnd))
+    .maybeSingle();
+  periodConfirmation = data || null;
+}
+
+// この期間が確定済みかどうか。確定後は出勤記録・立替金とも変更不可にする
+function isPeriodLocked() {
+  return !!periodConfirmation;
+}
+
+function blockIfLocked() {
+  if (!isPeriodLocked()) return false;
+  alert('この期間はすでに確定済みのため、変更できません。訂正が必要な場合は管理者にご連絡ください。');
+  return true;
+}
+
+async function confirmPeriod() {
+  const note = document.getElementById('periodNote').value.trim();
+  const { error } = await sb.from('period_confirmations').insert({
+    employee_id: employee.id,
+    period_end: dateStr(periodEnd),
+    note: note || null,
+  });
+  if (error) { alert('確定できませんでした: ' + error.message); return; }
+  await loadPeriodConfirmation();
+  renderMain();
+}
+
+function renderPeriodConfirmHtml() {
+  if (periodConfirmation) {
+    const when = new Date(periodConfirmation.confirmed_at);
+    const whenLabel = `${when.getMonth() + 1}月${when.getDate()}日`;
+    return `
+      <div class="sectionTitle">期間の確認</div>
+      <div class="card">
+        <div class="doneSub" style="text-align:left;">✅ ${whenLabel}に確定済みです${periodConfirmation.note ? '<br>メモ: ' + periodConfirmation.note : ''}</div>
+      </div>
+    `;
+  }
+  return `
+    <div class="sectionTitle">期間の確認</div>
+    <div class="card">
+      <p class="locHours" style="text-align:left; margin-bottom:10px;">${formatPeriodLabel()}の内容に間違いがなければ確定してください。確定後は内容を変更できなくなります。お知らせしたいことがあれば、メモ欄にご記入ください。</p>
+      <label style="font-size:12px;color:var(--muted);display:block;margin-bottom:4px;">メモ(任意)</label>
+      <textarea id="periodNote" rows="2" placeholder="例: 来月から火曜はお休みします" style="width:100%;border:1px solid var(--border);border-radius:8px;padding:10px;font-size:14px;margin-bottom:10px;background:var(--field);font-family:inherit;"></textarea>
+      <button class="bigbtn" onclick="confirmPeriod()">この期間の内容に間違いありません</button>
+    </div>
+  `;
+}
+
 function reimbursementForDate(ds) {
   return reimbursements.find((r) => r.date === ds);
 }
@@ -549,6 +619,7 @@ function toggleReimbForm() {
 }
 
 async function addReimbursementForSelectedDate() {
+  if (blockIfLocked()) return;
   const amount = parseInt(document.getElementById('reimbAmount').value, 10);
   const content = document.getElementById('reimbContent').value.trim();
   if (!amount || !content) { alert('金額・内容を入力してください'); return; }
@@ -559,6 +630,7 @@ async function addReimbursementForSelectedDate() {
 }
 
 async function deleteReimbursement(id) {
+  if (blockIfLocked()) return;
   if (!confirm('この立替金の記録を取り消しますか?')) return;
   await sb.from('reimbursements').delete().eq('id', id);
   await loadReimbursements();
@@ -573,10 +645,11 @@ function reimbursementSectionHtml() {
     return `
       <div class="reimbDone">
         立替金登録済み: ${Number(existing.amount).toLocaleString()}円 ・ ${existing.content}
-        <button class="linklike" onclick="deleteReimbursement('${existing.id}')">取消</button>
+        ${isPeriodLocked() ? '' : `<button class="linklike" onclick="deleteReimbursement('${existing.id}')">取消</button>`}
       </div>
     `;
   }
+  if (isPeriodLocked()) return '';
   return `
     <button class="linklike" id="toggleReimb" onclick="toggleReimbForm()">買い物があった場合はこちら</button>
     <div id="reimbForm" style="display:none;" class="correctForm">
