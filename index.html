@@ -640,7 +640,7 @@ function renderPeriodConfirmHtml() {
     <div class="card">
       <p class="locHours" style="text-align:left; margin-bottom:10px;">${formatPeriodLabel()}の内容に間違いがなければ確定してください。確定後は内容を変更できなくなります。お知らせしたいことがあれば、メモ欄にご記入ください。</p>
       <label style="font-size:12px;color:var(--muted);display:block;margin-bottom:4px;">メモ(任意)</label>
-      <textarea id="periodNote" rows="2" placeholder="例: 来月から火曜はお休みします" style="width:100%;border:1px solid var(--border);border-radius:8px;padding:10px;font-size:14px;margin-bottom:10px;background:var(--field);font-family:inherit;"></textarea>
+      <textarea id="periodNote" rows="2" placeholder="例)〇月〇日と〇月〇日をAさんと交代" style="width:100%;border:1px solid var(--border);border-radius:8px;padding:10px;font-size:14px;margin-bottom:10px;background:var(--field);font-family:inherit;"></textarea>
       <button class="bigbtn" onclick="confirmPeriod()">この期間の内容に間違いありません</button>
     </div>
   `;

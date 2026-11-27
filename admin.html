@@ -1015,7 +1015,10 @@ async function renderSummary() {
     .sort((a, b) => byCode(a, b) || a.location.localeCompare(b.location))
     .map((e) => {
       const reimbTotal = reimbByEmployee.get(e.employeeId);
-      const confirmed = confirmByEmployee.has(e.employeeId);
+      const confirmation = confirmByEmployee.get(e.employeeId);
+      const confirmCell = confirmation
+        ? `<span class="auditOk">✓</span>${confirmation.note ? '<br><span class="flag">あり</span>' : ''}`
+        : '-';
       return `
     <tr>
       <td>${e.code || '-'}</td>
@@ -1024,7 +1027,7 @@ async function renderSummary() {
       <td>${e.days}日</td>
       <td>${e.hours.toFixed(1)}時間</td>
       <td>${reimbTotal ? reimbTotal.toLocaleString() + '円' : '-'}</td>
-      <td>${confirmed ? '<span class="auditOk">✓</span>' : '-'}</td>
+      <td>${confirmCell}</td>
       <td>${e.hasNotes ? '<span class="flag">あり</span>' : '-'}</td>
       <td><button class="copybtn" onclick="showRowDetail('${e.employeeId}', '${e.locationId}')">詳細</button></td>
     </tr>
