@@ -103,8 +103,7 @@
   .audNames { font-size: 9px; color: var(--ink); line-height: 1.2; text-align: center; word-break: break-all; }
   .field-wrap { display: flex; flex-direction: column; gap: 2px; }
   .field-wrap label { font-size: 10px; color: var(--muted); }
-  .field-wrap input, .field-wrap select { min-width: 0; width: 100%; height: 36px; line-height: 34px; padding: 0 10px; box-sizing: border-box; }
-  .field-row-btn { height: 36px; line-height: 36px; padding: 0 14px; box-sizing: border-box; appearance: none; -webkit-appearance: none; }
+  .field-wrap input, .field-wrap select { min-width: 0; width: 100%; }
   .audNum { font-size: 13px; font-weight: 600; }
   .audHours { font-size: 10px; color: var(--muted); min-height: 12px; }
   .copybtn { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 6px 10px; font-size: 12px; cursor: pointer; }
@@ -220,8 +219,8 @@
     <label>必要人数</label>
     <input id="scheduleRequiredCount" class="field-muted" type="number" step="1" min="1" placeholder="例:1" />
   </div>
-  <button class="btn btn-primary field-row-btn" onclick="searchSchedules()">検索</button>
-  <button class="btn btn-secondary field-row-btn" onclick="addSchedule()">追加</button>
+  <button class="btn btn-primary" onclick="searchSchedules()">検索</button>
+  <button class="btn btn-secondary" onclick="addSchedule()">追加</button>
 </div>
 <details style="margin-bottom: 16px;">
   <summary style="cursor:pointer; color: var(--brown); font-size: 13px;">まとめて登録(CSV貼り付け)</summary>
@@ -619,8 +618,8 @@ function renderSchedules() {
                     <label>必要人数</label>
                     <input id="editRequired_${s.id}" type="number" step="1" min="1" value="${s.required_count || 1}" />
                   </div>
-                  <button class="btn btn-primary btn-small field-row-btn" onclick="saveScheduleEdit('${s.id}')">保存</button>
-                  <button class="copybtn field-row-btn" onclick="cancelScheduleEdit()">キャンセル</button>
+                  <button class="btn btn-primary btn-small" onclick="saveScheduleEdit('${s.id}')">保存</button>
+                  <button class="copybtn" onclick="cancelScheduleEdit()">キャンセル</button>
                 </div>
               </div>
             `;
