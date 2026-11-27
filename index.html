@@ -79,7 +79,7 @@
   }
   .correctForm { margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--border); }
   .correctForm label { font-size: 12px; color: var(--muted); display: block; margin-bottom: 4px; }
-  .correctForm input, .correctForm textarea {
+  .correctForm input, .correctForm textarea, .correctForm select {
     width: 100%;
     border: 1px solid var(--border);
     border-radius: 8px;
@@ -87,7 +87,10 @@
     font-size: 14px;
     margin-bottom: 10px;
     background: var(--field);
+    font-family: inherit;
   }
+  .reimbTotal { text-align: right; font-size: 13px; color: var(--muted); margin: 10px 0 2px; }
+  .reimbTotal strong { color: var(--ink); }
   .doneIcon { font-size: 48px; text-align: center; margin-bottom: 8px; }
   .doneMsg { text-align: center; font-size: 16px; font-weight: 700; margin-bottom: 4px; }
   .doneSub { text-align: center; font-size: 13px; color: var(--muted); }
@@ -154,6 +157,7 @@ let periodDates = new Set();
 let selectedDate = null;
 let holidaySet = new Set();
 const holidayCache = new Map();
+let reimbursements = [];
 
 const WEEKDAY_LABELS = ['日', '月', '火', '水', '木', '金', '土'];
 
@@ -344,7 +348,7 @@ async function init() {
   periodEnd = range.end;
   selectedDate = todayStr();
 
-  await Promise.all([loadRecent(), loadPeriodDates(), loadHolidaySet()]);
+  await Promise.all([loadRecent(), loadPeriodDates(), loadHolidaySet(), loadReimbursements()]);
   renderMain();
 }
 
@@ -379,6 +383,7 @@ function renderMain() {
     ${renderCalendarHtml()}
     <div id="daySection"></div>
     ${renderHistoryHtml()}
+    ${renderReimbursementHtml()}
   `;
   renderDayForSelected();
 }
@@ -517,6 +522,78 @@ async function deleteRecord(id) {
   if (!confirm('この記録を取り消しますか?')) return;
   await sb.from('attendance_records').delete().eq('id', id);
   await afterRecord();
+}
+
+function periodDateList() {
+  const list = [];
+  const cur = new Date(periodStart);
+  while (cur <= periodEnd) {
+    list.push(dateStr(cur));
+    cur.setDate(cur.getDate() + 1);
+  }
+  return list;
+}
+
+async function loadReimbursements() {
+  const { data } = await sb
+    .from('reimbursements')
+    .select('*')
+    .eq('employee_id', employee.id)
+    .gte('date', dateStr(periodStart))
+    .lte('date', dateStr(periodEnd))
+    .order('date', { ascending: false });
+  reimbursements = data || [];
+}
+
+async function addReimbursement() {
+  const date = document.getElementById('reimbDate').value;
+  const amount = parseInt(document.getElementById('reimbAmount').value, 10);
+  const content = document.getElementById('reimbContent').value.trim();
+  if (!date || !amount || !content) { alert('日付・金額・内容をすべて入力してください'); return; }
+  const { error } = await sb.from('reimbursements').insert({ employee_id: employee.id, date, amount, content });
+  if (error) { alert('登録できませんでした: ' + error.message); return; }
+  document.getElementById('reimbAmount').value = '';
+  document.getElementById('reimbContent').value = '';
+  await loadReimbursements();
+  renderMain();
+}
+
+async function deleteReimbursement(id) {
+  if (!confirm('この立替金の記録を取り消しますか?')) return;
+  await sb.from('reimbursements').delete().eq('id', id);
+  await loadReimbursements();
+  renderMain();
+}
+
+function renderReimbursementHtml() {
+  const dateOptions = periodDateList().map((ds) => `<option value="${ds}" ${ds === todayStr() ? 'selected' : ''}>${dateLabel(ds)}</option>`).join('');
+  const total = reimbursements.reduce((sum, r) => sum + Number(r.amount), 0);
+  const rows = reimbursements.map((r) => `
+    <div class="histRow">
+      <div>
+        <div class="histDate">${dateLabel(r.date)}</div>
+        <div class="histDetail">${r.content} ・ ${Number(r.amount).toLocaleString()}円</div>
+      </div>
+      <div class="histActions">
+        <button onclick="deleteReimbursement('${r.id}')">取消</button>
+      </div>
+    </div>
+  `).join('');
+  return `
+    <div class="sectionTitle">立替金(清掃用品などを購入した場合)</div>
+    <div class="card">
+      <div class="correctForm" style="margin-top:0; padding-top:0; border-top:none;">
+        <label>日付</label>
+        <select id="reimbDate">${dateOptions}</select>
+        <label>金額(円)</label>
+        <input id="reimbAmount" type="number" step="1" min="0" placeholder="例: 500" />
+        <label>内容</label>
+        <input id="reimbContent" type="text" placeholder="例: 洗剤" />
+        <button class="bigbtn" onclick="addReimbursement()">登録する</button>
+      </div>
+      ${reimbursements.length ? `<div class="reimbTotal">今期間の合計: <strong>${total.toLocaleString()}円</strong></div>${rows}` : ''}
+    </div>
+  `;
 }
 
 function renderHistoryHtml() {
