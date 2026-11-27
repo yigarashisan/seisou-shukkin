@@ -112,7 +112,13 @@
     margin-bottom: 20px; background: var(--surface); border: 1.5px solid var(--border);
     border-radius: 18px; padding: 16px 14px;
   }
-  .calTitle { text-align: center; font-size: 13px; color: var(--muted); margin-bottom: 10px; font-weight: 600; }
+  .calNav { display: flex; align-items: center; justify-content: space-between; gap: 6px; margin-bottom: 10px; }
+  .calTitle { text-align: center; font-size: 13px; color: var(--muted); font-weight: 600; flex: 1; }
+  .calNavBtn {
+    flex: 0 0 auto; background: var(--field); border: 1px solid var(--border); border-radius: 8px;
+    padding: 6px 10px; font-size: 12px; color: var(--brown); cursor: pointer; font-family: inherit;
+  }
+  .calNavBtn:disabled { color: var(--border); cursor: default; }
   .calGrid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 5px; }
   .calHead { margin-bottom: 5px; }
   .calHeadCell { text-align: center; font-size: 13px; font-weight: 600; color: var(--muted); }
@@ -157,6 +163,7 @@ let periodStart = null;
 let periodEnd = null;
 let periodDates = new Set();
 let selectedDate = null;
+let viewPeriodBase = new Date();
 let holidaySet = new Set();
 const holidayCache = new Map();
 let reimbursements = [];
@@ -238,6 +245,34 @@ function formatPeriodLabel() {
   return `${wareki(periodStart)} 〜 ${wareki(periodEnd)}`;
 }
 
+function isCurrentPeriod() {
+  return periodStart.getTime() === payPeriodRange(new Date()).start.getTime();
+}
+
+function setPeriodFromBase() {
+  const range = payPeriodRange(viewPeriodBase);
+  periodStart = range.start;
+  periodEnd = range.end;
+}
+
+async function loadPeriodData() {
+  await Promise.all([loadRecent(), loadPeriodDates(), loadHolidaySet(), loadReimbursements(), loadPeriodConfirmation()]);
+}
+
+async function changePeriod(delta) {
+  const actual = payPeriodRange(new Date());
+  const next = new Date(viewPeriodBase);
+  next.setMonth(next.getMonth() + delta);
+  const nextRange = payPeriodRange(next);
+  if (nextRange.start > actual.start) return;
+  viewPeriodBase = next;
+  setPeriodFromBase();
+  const today = new Date();
+  selectedDate = (periodStart <= today && today <= periodEnd) ? todayStr() : dateStr(periodEnd);
+  await loadPeriodData();
+  renderMain();
+}
+
 function buildCalendarDays() {
   const days = [];
   for (let i = 0; i < periodStart.getDay(); i++) days.push(null);
@@ -305,7 +340,11 @@ function renderCalendarHtml() {
   }).join('');
   return `
     <div class="calWrap">
-      <div class="calTitle">${formatPeriodLabel()}の記録</div>
+      <div class="calNav">
+        <button class="calNavBtn" onclick="changePeriod(-1)">‹ 前の期間</button>
+        <div class="calTitle">${formatPeriodLabel()}の記録</div>
+        <button class="calNavBtn" onclick="changePeriod(1)" ${isCurrentPeriod() ? 'disabled' : ''}>次の期間 ›</button>
+      </div>
       <div class="calGrid calHead">${WEEKDAY_LABELS.map((w, i) => `<div class="calHeadCell ${i === 0 ? 'calSun' : i === 6 ? 'calSat' : ''}">${w}</div>`).join('')}</div>
       <div class="calGrid">${cells}</div>
     </div>
@@ -346,12 +385,10 @@ async function init() {
     return;
   }
 
-  const range = payPeriodRange(new Date());
-  periodStart = range.start;
-  periodEnd = range.end;
+  setPeriodFromBase();
   selectedDate = todayStr();
 
-  await Promise.all([loadRecent(), loadPeriodDates(), loadHolidaySet(), loadReimbursements(), loadPeriodConfirmation()]);
+  await loadPeriodData();
   renderMain();
 }
 
