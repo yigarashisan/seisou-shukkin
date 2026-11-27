@@ -91,6 +91,8 @@
   }
   .reimbTotal { text-align: right; font-size: 13px; color: var(--muted); margin: 10px 0 2px; }
   .reimbTotal strong { color: var(--ink); }
+  .reimbDone { text-align: center; font-size: 12px; color: var(--muted); margin-top: 12px; }
+  .reimbDone button { border: none; background: none; color: var(--brown); font-size: 12px; text-decoration: underline; cursor: pointer; margin-left: 6px; }
   .doneIcon { font-size: 48px; text-align: center; margin-bottom: 8px; }
   .doneMsg { text-align: center; font-size: 16px; font-weight: 700; margin-bottom: 4px; }
   .doneSub { text-align: center; font-size: 13px; color: var(--muted); }
@@ -444,6 +446,7 @@ async function renderConfirmInto(container) {
         <div class="doneMsg">${dateLbl}の記録は入力済みです</div>
         <div class="doneSub">${selectedAssignment.location_name} / ${recordDetailLabel(existing, selectedAssignment)}</div>
         <button class="linklike" onclick="deleteRecord('${existing.id}')">この記録を取り消す</button>
+        ${reimbursementSectionHtml()}
       </div>
       ${myAssignments.length > 1 ? `<button class="linklike" onclick="renderChoiceInto(document.getElementById('daySection'), myAssignments)">別の場所を記録する</button>` : ''}
     `;
@@ -467,6 +470,7 @@ async function renderConfirmInto(container) {
         <textarea id="reason" rows="2" placeholder="例: ゴミが多かったため延長"></textarea>
         <button class="bigbtn" onclick="recordCorrected()">この内容で記録する</button>
       </div>
+      ${reimbursementSectionHtml()}
     </div>
     ${myAssignments.length > 1 ? `<button class="linklike" onclick="renderChoiceInto(document.getElementById('daySection'), myAssignments)">別の場所を記録する</button>` : ''}
   `;
@@ -524,16 +528,6 @@ async function deleteRecord(id) {
   await afterRecord();
 }
 
-function periodDateList() {
-  const list = [];
-  const cur = new Date(periodStart);
-  while (cur <= periodEnd) {
-    list.push(dateStr(cur));
-    cur.setDate(cur.getDate() + 1);
-  }
-  return list;
-}
-
 async function loadReimbursements() {
   const { data } = await sb
     .from('reimbursements')
@@ -545,15 +539,21 @@ async function loadReimbursements() {
   reimbursements = data || [];
 }
 
-async function addReimbursement() {
-  const date = document.getElementById('reimbDate').value;
+function reimbursementForDate(ds) {
+  return reimbursements.find((r) => r.date === ds);
+}
+
+function toggleReimbForm() {
+  const el = document.getElementById('reimbForm');
+  el.style.display = el.style.display === 'none' ? 'block' : 'none';
+}
+
+async function addReimbursementForSelectedDate() {
   const amount = parseInt(document.getElementById('reimbAmount').value, 10);
   const content = document.getElementById('reimbContent').value.trim();
-  if (!date || !amount || !content) { alert('日付・金額・内容をすべて入力してください'); return; }
-  const { error } = await sb.from('reimbursements').insert({ employee_id: employee.id, date, amount, content });
+  if (!amount || !content) { alert('金額・内容を入力してください'); return; }
+  const { error } = await sb.from('reimbursements').insert({ employee_id: employee.id, date: selectedDate, amount, content });
   if (error) { alert('登録できませんでした: ' + error.message); return; }
-  document.getElementById('reimbAmount').value = '';
-  document.getElementById('reimbContent').value = '';
   await loadReimbursements();
   renderMain();
 }
@@ -565,8 +565,32 @@ async function deleteReimbursement(id) {
   renderMain();
 }
 
+// 「出勤しました」ボタンの近くに表示する、買い物があった場合だけ開く入力欄。
+// 1日1件までを想定し、既に登録済みならその内容と取消リンクを表示する
+function reimbursementSectionHtml() {
+  const existing = reimbursementForDate(selectedDate);
+  if (existing) {
+    return `
+      <div class="reimbDone">
+        立替金登録済み: ${Number(existing.amount).toLocaleString()}円 ・ ${existing.content}
+        <button class="linklike" onclick="deleteReimbursement('${existing.id}')">取消</button>
+      </div>
+    `;
+  }
+  return `
+    <button class="linklike" id="toggleReimb" onclick="toggleReimbForm()">買い物があった場合はこちら</button>
+    <div id="reimbForm" style="display:none;" class="correctForm">
+      <label>金額(円)</label>
+      <input id="reimbAmount" type="number" step="1" min="0" placeholder="例: 500" />
+      <label>内容</label>
+      <input id="reimbContent" type="text" placeholder="例: 洗剤" />
+      <button class="bigbtn" onclick="addReimbursementForSelectedDate()">立替金を登録する</button>
+    </div>
+  `;
+}
+
 function renderReimbursementHtml() {
-  const dateOptions = periodDateList().map((ds) => `<option value="${ds}" ${ds === todayStr() ? 'selected' : ''}>${dateLabel(ds)}</option>`).join('');
+  if (reimbursements.length === 0) return '';
   const total = reimbursements.reduce((sum, r) => sum + Number(r.amount), 0);
   const rows = reimbursements.map((r) => `
     <div class="histRow">
@@ -580,18 +604,10 @@ function renderReimbursementHtml() {
     </div>
   `).join('');
   return `
-    <div class="sectionTitle">立替金(清掃用品などを購入した場合)</div>
+    <div class="sectionTitle">立替金(清掃用品などの購入分)</div>
     <div class="card">
-      <div class="correctForm" style="margin-top:0; padding-top:0; border-top:none;">
-        <label>日付</label>
-        <select id="reimbDate">${dateOptions}</select>
-        <label>金額(円)</label>
-        <input id="reimbAmount" type="number" step="1" min="0" placeholder="例: 500" />
-        <label>内容</label>
-        <input id="reimbContent" type="text" placeholder="例: 洗剤" />
-        <button class="bigbtn" onclick="addReimbursement()">登録する</button>
-      </div>
-      ${reimbursements.length ? `<div class="reimbTotal">今期間の合計: <strong>${total.toLocaleString()}円</strong></div>${rows}` : ''}
+      <div class="reimbTotal">今期間の合計: <strong>${total.toLocaleString()}円</strong></div>
+      ${rows}
     </div>
   `;
 }
