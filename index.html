@@ -16,6 +16,8 @@
     --brown: #7c5d48;
     --pink: #F0A8C4;
     --coral: #F7877C;
+    --dusty-blue: #6C8CAE;
+    --dusty-red: #B5726B;
   }
   * { box-sizing: border-box; }
   body {
@@ -106,15 +108,20 @@
   .calGrid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 5px; }
   .calHead { margin-bottom: 5px; }
   .calHeadCell { text-align: center; font-size: 11px; color: var(--muted); }
+  .calHeadCell.calSun { color: var(--dusty-red); }
+  .calHeadCell.calSat { color: var(--dusty-blue); }
   .calCell {
     aspect-ratio: 1; width: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center;
     border-radius: 10px; border: none; background: var(--field); font-size: 13px; color: var(--ink);
     position: relative; padding: 0; font-family: inherit;
   }
   .calCell.calEmpty { background: transparent; }
-  .calCell.calDisabled { color: var(--border); background: transparent; }
+  .calCell.calDisabled { background: transparent; opacity: 0.5; }
   .calCell.calToday:not(.calSelected) { box-shadow: inset 0 0 0 1.5px var(--brown); }
   .calCell.calSelected { background: var(--brown); color: #fff; }
+  .calNum.calNumSun { color: var(--dusty-red); }
+  .calNum.calNumSat { color: var(--dusty-blue); }
+  .calCell.calSelected .calNum { color: #fff; }
   .calCheck { font-size: 9px; line-height: 1; color: var(--coral); margin-top: 2px; }
   .calCell.calSelected .calCheck { color: #fff; }
 </style>
@@ -138,6 +145,8 @@ let periodStart = null;
 let periodEnd = null;
 let periodDates = new Set();
 let selectedDate = null;
+let holidaySet = new Set();
+const holidayCache = new Map();
 
 const WEEKDAY_LABELS = ['日', '月', '火', '水', '木', '金', '土'];
 
@@ -218,6 +227,30 @@ function buildCalendarDays() {
   return days;
 }
 
+// 日本の祝日一覧を年ごとに取得してキャッシュする(カレンダーの色分け表示用)。
+// 取得できなくても通常の予定なし表示になるだけなので、エラーは握りつぶす
+async function getHolidaySet(year) {
+  if (holidayCache.has(year)) return holidayCache.get(year);
+  let set = new Set();
+  try {
+    const res = await fetch(`https://holidays-jp.github.io/api/v1/${year}/date.json`);
+    const data = await res.json();
+    set = new Set(Object.keys(data));
+  } catch (e) {
+    console.error('祝日データの取得に失敗しました', e);
+  }
+  holidayCache.set(year, set);
+  return set;
+}
+
+async function loadHolidaySet() {
+  const [a, b] = await Promise.all([
+    getHolidaySet(periodStart.getFullYear()),
+    getHolidaySet(periodEnd.getFullYear()),
+  ]);
+  holidaySet = new Set([...a, ...b]);
+}
+
 async function loadPeriodDates() {
   const { data } = await sb
     .from('attendance_records')
@@ -234,18 +267,23 @@ function renderCalendarHtml() {
     if (!d) return '<div class="calCell calEmpty"></div>';
     const ds = dateStr(d);
     const isFuture = ds > todayS;
+    const dow = d.getDay();
+    const isHoliday = holidaySet.has(ds);
     const cls = ['calCell'];
     if (isFuture) cls.push('calDisabled');
     if (ds === todayS) cls.push('calToday');
     if (ds === selectedDate) cls.push('calSelected');
-    if (isFuture) return `<div class="${cls.join(' ')}"><span class="calNum">${d.getDate()}</span></div>`;
+    const numCls = ['calNum'];
+    if (isHoliday || dow === 0) numCls.push('calNumSun');
+    else if (dow === 6) numCls.push('calNumSat');
+    if (isFuture) return `<div class="${cls.join(' ')}"><span class="${numCls.join(' ')}">${d.getDate()}</span></div>`;
     const check = periodDates.has(ds) ? '<span class="calCheck">✓</span>' : '';
-    return `<button type="button" class="${cls.join(' ')}" onclick="selectDate('${ds}')"><span class="calNum">${d.getDate()}</span>${check}</button>`;
+    return `<button type="button" class="${cls.join(' ')}" onclick="selectDate('${ds}')"><span class="${numCls.join(' ')}">${d.getDate()}</span>${check}</button>`;
   }).join('');
   return `
     <div class="calWrap">
       <div class="calTitle">${formatPeriodLabel()}の記録</div>
-      <div class="calGrid calHead">${WEEKDAY_LABELS.map((w) => `<div class="calHeadCell">${w}</div>`).join('')}</div>
+      <div class="calGrid calHead">${WEEKDAY_LABELS.map((w, i) => `<div class="calHeadCell ${i === 0 ? 'calSun' : i === 6 ? 'calSat' : ''}">${w}</div>`).join('')}</div>
       <div class="calGrid">${cells}</div>
     </div>
   `;
@@ -290,7 +328,7 @@ async function init() {
   periodEnd = range.end;
   selectedDate = todayStr();
 
-  await Promise.all([loadRecent(), loadPeriodDates()]);
+  await Promise.all([loadRecent(), loadPeriodDates(), loadHolidaySet()]);
   renderMain();
 }
 
