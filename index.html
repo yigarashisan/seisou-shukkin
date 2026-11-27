@@ -121,6 +121,8 @@
   .calCell.calEmpty { background: transparent; border-color: transparent; }
   .calCell.calDisabled { background: var(--surface); }
   .calCell.calDisabled .calNum { color: var(--muted); }
+  .calCell.calDisabled .calNum.calNumSun { color: var(--dusty-red); }
+  .calCell.calDisabled .calNum.calNumSat { color: var(--dusty-blue); }
   .calCell.calToday:not(.calSelected) { box-shadow: inset 0 0 0 2px var(--brown); border-color: var(--brown); }
   .calCell.calSelected { background: var(--brown); border-color: var(--brown); color: #fff; }
   .calNum { font-size: 19px; font-weight: 700; }
